@@ -1,0 +1,2412 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J-AP Plus - J-Architect-Pilot</title>
+    <script src="/vendor/tailwindcdn.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        :root {
+            --bg-primary: #F8FAFC;
+            --bg-secondary: #ffffff;
+            --bg-card: #ffffff;
+            --border-color: #F1F5F9;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #22c55e;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+            --accent-purple: #8b5cf6;
+            --text-primary: #111827;
+            --text-secondary: #374151;
+            --text-muted: #6b7280;
+        }
+        
+        * { font-family: 'Inter', system-ui, sans-serif; }
+        code, pre, .mono { font-family: 'JetBrains Mono', monospace; }
+        
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #edf3fb; }
+        ::-webkit-scrollbar-thumb { background: #bfd5ee; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #95bce6; }
+
+        .glass-panel {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: none;
+        }
+
+        .app-panel {
+            background: #ffffff;
+            border: 1px solid #F1F5F9;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.04), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+        }
+
+        #appShell {
+            gap: 24px;
+            transition: all 0.28s ease;
+        }
+        .left-sidebar-wrap {
+            position: relative;
+            width: 300px;
+            min-width: 300px;
+            height: 100%;
+            min-height: 0;
+            transition: width 0.28s ease, min-width 0.28s ease;
+        }
+        .left-sidebar {
+            width: 300px;
+            min-width: 300px;
+            height: 100%;
+            min-height: 0;
+            transition: width 0.28s ease, min-width 0.28s ease, opacity 0.22s ease;
+        }
+        .left-sidebar-content {
+            height: 100%;
+            min-height: 0;
+            overflow: hidden;
+            transition: opacity 0.2s ease;
+        }
+        .left-sidebar-scroll {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: scroll !important;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+        }
+        .left-sidebar-toggle {
+            position: absolute;
+            right: -14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 28px;
+            height: 54px;
+            border-radius: 9999px;
+            border: 1px solid #dbe3ec;
+            background: #ffffff;
+            color: #475569;
+            font-size: 13px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            cursor: pointer;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+            transition: all 0.28s ease;
+        }
+        .left-sidebar-toggle-icon {
+            display: inline-block;
+            transition: transform 0.28s ease;
+        }
+        #appShell.left-collapsed .left-sidebar-wrap {
+            width: 48px;
+            min-width: 48px;
+        }
+        #appShell.left-collapsed .left-sidebar {
+            width: 48px;
+            min-width: 48px;
+            opacity: 1;
+            overflow: hidden;
+        }
+        #appShell.left-collapsed .left-sidebar-toggle {
+            right: 10px;
+        }
+        #appShell.left-collapsed .left-sidebar-content {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #appShell.left-collapsed .left-sidebar-toggle .left-sidebar-toggle-icon {
+            transform: rotate(180deg);
+        }
+        .right-panel {
+            width: 360px;
+            min-width: 360px;
+        }
+        .lab-canvas {
+            background-color: #F8FAFC;
+            background-image: none;
+        }
+        .bottom-console {
+            flex: 1;
+            min-height: 0;
+        }
+
+        .glow-blue, .glow-green, .glow-red, .glow-yellow { box-shadow: none; }
+
+        .state-node { transition: fill 0.2s ease, stroke 0.2s ease, opacity 0.2s ease; }
+        .state-node.active {
+            transform: none;
+            z-index: 10;
+        }
+        .state-node.completed { opacity: 1; }
+
+        .state-arrow {
+            transition: stroke 0.2s ease;
+            stroke-width: 1.5px;
+        }
+        .state-arrow.active { stroke: #94A3B8; filter: none; }
+
+        .log-entry {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-12px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .pulse-dot {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .typing-indicator span {
+            animation: typingBounce 1.4s infinite ease-in-out both;
+        }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typingBounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        .file-tree-item { transition: background 0.15s ease, border-color 0.15s ease; border: 1px solid transparent; }
+        .file-tree-item:hover { background: #f3f4f6; border-color: #e5e7eb; }
+        .file-tree-item.selected { background: #eff6ff; border-color: #bfdbfe; }
+        .folder-tree-item { transition: background 0.15s ease, border-color 0.15s ease; border: 1px solid transparent; }
+        .folder-tree-item:hover { background: #f3f4f6; border-color: #e5e7eb; }
+        .folder-tree-item.selected { background: #f0fdf4; border-color: #bbf7d0; }
+
+        .code-line { transition: background 0.15s ease; }
+        .code-line.error { background: rgba(239, 143, 143, 0.2); }
+        .code-line.fixed { background: rgba(101, 190, 127, 0.16); }
+
+        .mermaid-container { background: #ffffff; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; }
+
+        .toggle-switch {
+            position: relative; width: 48px; height: 26px;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background: #d7e6f8; border-radius: 26px; transition: 0.3s;
+        }
+        .toggle-slider:before {
+            content: ""; position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px;
+            background: white; border-radius: 50%; transition: 0.3s;
+        }
+        input:checked + .toggle-slider { background: var(--accent-red); }
+        input:checked + .toggle-slider:before { transform: translateX(22px); }
+
+        .progress-ring { transform: rotate(-90deg); }
+        .progress-ring-circle {
+            transition: stroke-dashoffset 0.35s;
+            transform-origin: 50% 50%;
+        }
+        
+        .tech-chip {
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: #ffffff;
+            cursor: default;
+            transition: all 0.2s;
+            line-height: 1.35;
+        }
+        .tech-chip.selected { border-color: #d1d5db; background: #ffffff; }
+        .tech-chip:hover:not(.selected) { border-color: #d1d5db; }
+        
+        .ws-status { display: flex; align-items: center; gap: 6px; }
+        .ws-status .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .ws-status .dot.connected { background: #22c55e; box-shadow: none; }
+        .ws-status .dot.disconnected { background: #ef8f8f; }
+        .ws-status .dot.connecting { background: #f2c981; animation: pulse 1s infinite; }
+        nav.glass-panel { box-shadow: none; }
+
+        .tech-chip {
+            position: relative;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 10px 10px 10px 16px !important;
+        }
+        .tech-chip::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            border-radius: 10px 0 0 10px;
+            background: #cbd5e1;
+        }
+        .tech-chip[data-tech="jdk25"]::before { background: #a8c8b0; }
+        .tech-chip[data-tech="springboot"]::before { background: #9bc5cf; }
+        .tech-chip[data-tech="langchain4j"]::before { background: #b9b7d9; }
+        .tech-chip[data-tech="mysql"]::before { background: #d9c9a8; }
+        .tech-chip.selected {
+            background: #ffffff !important;
+            border-color: #d5e1ef !important;
+            box-shadow: none;
+        }
+
+        #logContainer {
+            background: #ffffff;
+            color: #24292f;
+            font-family: 'JetBrains Mono', monospace !important;
+            padding: 18px !important;
+            font-size: 15px !important;
+            line-height: 1.6 !important;
+        }
+
+        #buildTerminal {
+            background: #f8fafc;
+            border-top: 1px solid #e5e7eb;
+            color: #334155;
+        }
+
+        #currentStateLabel,
+        #globalStatus {
+            background: #ffffff !important;
+            border-color: #e5e7eb !important;
+            color: #475569 !important;
+        }
+
+        #stateMachineSvg text {
+            fill: #475569 !important;
+            font-size: 18px !important;
+            font-weight: 700 !important;
+        }
+
+        .state-arrow {
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .p-4 { padding: 1.5rem !important; }
+        .p-3 { padding: 1rem !important; }
+        .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem !important; }
+        .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem !important; }
+        .space-y-5 > :not([hidden]) ~ :not([hidden]) { margin-top: 1.5rem !important; }
+        .gap-4 { gap: 1.5rem !important; }
+
+        .panel-title {
+            font-size: 18px !important;
+            font-weight: 600 !important;
+            color: #0f172a !important;
+            letter-spacing: 0;
+            text-transform: none !important;
+        }
+
+        .field-label {
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            color: #475569 !important;
+            text-transform: none !important;
+            letter-spacing: 0;
+        }
+
+        textarea, input[type="text"], input[type="password"], select {
+            font-size: 14px !important;
+            line-height: 1.6 !important;
+            border-color: #e5e7eb !important;
+            box-shadow: none !important;
+            background: #f8fafc !important;
+        }
+        textarea:focus, input[type="text"]:focus, input[type="password"]:focus, select:focus {
+            border-color: #3b82f6 !important;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16) !important;
+            background: #ffffff !important;
+        }
+
+        textarea {
+            font-size: 15px !important;
+            line-height: 1.6 !important;
+        }
+
+        .primary-btn {
+            background: #ffffff !important;
+            border: 1px solid #d1d5db !important;
+            color: #111827 !important;
+            box-shadow: none !important;
+        }
+        .primary-btn:hover {
+            background: #f9fafb !important;
+            border-color: #9ca3af !important;
+        }
+        .primary-btn:disabled {
+            background: #f3f4f6 !important;
+            color: #9ca3af !important;
+            border-color: #e5e7eb !important;
+        }
+
+        #workspaceTopProgressTrack {
+            height: 2px;
+            background: #f3f4f6;
+        }
+        #workspaceTopProgressBar {
+            height: 2px;
+            background: #3b82f6;
+            width: 0%;
+            transition: width 0.35s ease;
+        }
+
+        .llm-alert {
+            color: #EF4444 !important;
+            background: #FEF2F2 !important;
+            border: 1px solid #FCA5A5 !important;
+            font-weight: 700 !important;
+        }
+        .console-tab {
+            font-size: 14px;
+            font-weight: 500;
+            color: #64748b;
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            background: transparent;
+            transition: all 0.15s ease;
+        }
+        .console-tab.active {
+            color: #1e293b;
+            background: #f8fafc;
+            border-color: #e2e8f0;
+        }
+    </style>
+</head>
+<body class="min-h-screen overflow-hidden">
+
+<nav class="h-14 glass-panel flex items-center justify-between px-6 border-b border-[--border-color] relative z-50">
+    <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center font-bold text-sm text-white">J</div>
+        <span class="font-semibold text-lg tracking-tight">J-Architect-Pilot</span>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-white text-slate-600 border border-slate-300 ml-2">2026 宸ヤ笟绾?/span>
+    </div>
+    <div class="flex items-center gap-4">
+        <div id="llmWorkingIndicator" class="hidden items-center gap-2 px-3 py-1 rounded-full bg-blue-100 border border-blue-200">
+            <span class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+            <span id="llmWorkingText" class="text-xs text-blue-600">LLM 鎬濊€冧腑...</span>
+        </div>
+        <div id="llmStatus" class="text-xs px-3 py-1 rounded-full llm-alert">
+            LLM: 鏈厤缃?
+        </div>
+        <div class="ws-status text-xs">
+            <span class="dot disconnected" id="wsDot"></span>
+            <span id="wsStatus" class="text-[--text-muted]">WebSocket: 鏈繛鎺?/span>
+        </div>
+        <div id="globalStatus" class="text-xs px-3 py-1 rounded-full bg-white text-slate-600 border border-slate-200">
+            绯荤粺绌洪棽
+        </div>
+        <button onclick="openSettings()" class="p-2 rounded-lg hover:bg-slate-100 transition-colors" title="绯荤粺璁剧疆">
+            <svg class="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+        </button>
+    </div>
+</nav>
+
+<div id="appShell" class="flex h-[calc(100vh-56px)] p-6">
+
+    <div class="left-sidebar-wrap">
+    <aside id="leftSidebar" class="left-sidebar glass-panel app-panel flex flex-col overflow-hidden h-full min-h-0">
+        <button id="leftSidebarToggle" class="left-sidebar-toggle" onclick="toggleLeftSidebar()" title="鎶樺彔/灞曞紑鎺у埗鍙?>
+            <span class="left-sidebar-toggle-icon">鉂?/span>
+        </button>
+        <div class="left-sidebar-content flex flex-col min-h-0">
+        <div class="p-4 border-b border-[--border-color]">
+            <h2 class="panel-title">闇€姹傛帶鍒跺彴</h2>
+        </div>
+
+        <div class="left-sidebar-scroll p-4 space-y-5">
+            
+            <div>
+                <label class="field-label block mb-2">鎶€鏈爤</label>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="tech-chip selected" data-tech="jdk25">
+                        <span class="text-xs font-medium">JDK 25</span><br><span class="text-[10px] text-[--text-muted]">缁撴瀯鍖栧苟鍙?/span>
+                    </div>
+                    <div class="tech-chip selected" data-tech="springboot">
+                        <span class="text-xs font-medium">Spring Boot 3.4</span><br><span class="text-[10px] text-[--text-muted]">铏氭嫙绾跨▼</span>
+                    </div>
+                    <div class="tech-chip selected" data-tech="langchain4j">
+                        <span class="text-xs font-medium">LangChain4j</span><br><span class="text-[10px] text-[--text-muted]">1.0.0 绋冲畾鐗?/span>
+                    </div>
+                    <div class="tech-chip selected" data-tech="mysql">
+                        <span class="text-xs font-medium">MySQL 9.x</span><br><span class="text-[10px] text-[--text-muted]">+ Redis 7.4+</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="field-label block mb-2">涓氬姟鐩爣 <span class="text-red-400">*</span></label>
+                    <textarea id="businessGoalInput" rows="4" placeholder="鎻忚堪甯屾湜瀹炵幇鐨勬牳蹇冧笟鍔＄洰鏍囷紙蹇呭～锛?
+                        class="w-full bg-[--bg-secondary] border border-[--border-color] rounded-lg p-3 text-[13px] text-[--text-primary] placeholder-[--text-muted] resize-none focus:outline-none mono"></textarea>
+                </div>
+                <div>
+                    <label class="field-label block mb-2">鏍稿績瀹炰綋锛堝彲閫夛級</label>
+                    <textarea id="coreEntitiesInput" rows="2" placeholder="渚嬪锛氱敤鎴枫€佽鍗曘€佸晢鍝?
+                        class="w-full bg-[--bg-secondary] border border-[--border-color] rounded-lg p-2.5 text-[13px] text-[--text-primary] placeholder-[--text-muted] resize-none focus:outline-none mono"></textarea>
+                </div>
+                <div>
+                    <label class="field-label block mb-2">鍏抽敭鎺ュ彛锛堝彲閫夛級</label>
+                    <textarea id="keyInterfacesInput" rows="2" placeholder="渚嬪锛氱敤鎴?CRUD銆佽鍗曞垱寤恒€佸垎椤垫煡璇?
+                        class="w-full bg-[--bg-secondary] border border-[--border-color] rounded-lg p-2.5 text-[13px] text-[--text-primary] placeholder-[--text-muted] resize-none focus:outline-none mono"></textarea>
+                </div>
+                <div>
+                    <label class="field-label block mb-2">杈圭晫鏉′欢锛堝彲閫夛級</label>
+                    <textarea id="boundaryConditionsInput" rows="2" placeholder="渚嬪锛氫粎鍐呴儴缃戠粶鍙闂€佸崟绉熸埛銆佹暟鎹繚鐣?90 澶?
+                        class="w-full bg-[--bg-secondary] border border-[--border-color] rounded-lg p-2.5 text-[13px] text-[--text-primary] placeholder-[--text-muted] resize-none focus:outline-none mono"></textarea>
+                </div>
+                <div>
+                    <label class="field-label block mb-2">闈炲姛鑳借姹傦紙鍙€夛級</label>
+                    <textarea id="nonFunctionalInput" rows="2" placeholder="渚嬪锛?9.9% 鍙敤鎬с€佹帴鍙ｅ搷搴?< 200ms銆佸璁℃棩蹇?
+                        class="w-full bg-[--bg-secondary] border border-[--border-color] rounded-lg p-2.5 text-[13px] text-[--text-primary] placeholder-[--text-muted] resize-none focus:outline-none mono"></textarea>
+                </div>
+                <textarea id="requirementInput" class="hidden"></textarea>
+            </div>
+
+            <div class="rounded-xl border border-[--border-color] bg-[--bg-secondary] p-3">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                            <span class="text-xs font-semibold text-red-400">鏁呴殰妯℃嫙</span>
+                        </div>
+                        <p class="text-[10px] text-[--text-muted] mt-1 ml-6">妯℃嫙 E02 缂栬瘧閿欒 鈫?鑷剤寰幆</p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="faultToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div id="faultDetail" class="hidden mt-2 pt-2 border-t border-[--border-color]">
+                    <select id="faultType" class="w-full bg-[--bg-primary] border border-[--border-color] rounded-md text-xs p-1.5 text-[--text-secondary] focus:outline-none">
+                        <option value="E02">E02 鈥?缂栬瘧閿欒锛堟柟娉曞悕鎷煎啓閿欒锛?/option>
+                        <option value="E06">E06 鈥?娴嬭瘯澶辫触锛堟湇鍔″眰绌烘寚閽堬級</option>
+                        <option value="E05">E05 鈥?瀹夊叏杩濊锛堣矾寰勯亶鍘嗭級</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <button id="designBtn" onclick="startDesignOnly()" 
+                    class="primary-btn w-full py-2.5 rounded-xl font-semibold text-sm transition-all duration-150 active:scale-[0.99] flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    鐢熸垚璁捐濂椾欢
+                </button>
+                
+                <button id="implementBtn" onclick="startFullPipeline()" disabled
+                    class="primary-btn w-full py-2.5 rounded-xl font-semibold text-sm transition-all duration-150 active:scale-[0.99] flex items-center justify-center gap-2 disabled:opacity-100 disabled:cursor-not-allowed">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                    寮€濮嬬墿鐞嗗疄鐜?
+                </button>
+            </div>
+
+            <div id="approvalBar" class="hidden p-4 rounded-xl border-2 border-green-200 bg-green-50/90">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center">
+                            <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-green-400">鈴革笍 绛夊緟瀹℃壒</div>
+                            <div class="text-xs text-green-300">璁捐闃舵宸插畬鎴愶紝璇峰闃呭悗缁х画</div>
+                        </div>
+                    </div>
+                    <button onclick="approveAndContinue()" 
+                        class="px-6 py-2.5 rounded-lg text-sm font-bold bg-green-100 hover:bg-green-200 text-green-700 border border-green-200 transition-all hover:scale-105">
+                        鉁?纭骞剁户缁?
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mt-auto">
+                <div class="rounded-lg bg-[--bg-secondary] border border-[--border-color] p-2.5 text-center">
+                    <div class="text-lg font-bold text-[--accent-cyan]" id="statDuration">--</div>
+                    <div class="text-[10px] text-[--text-muted]">鑰楁椂 (绉?</div>
+                </div>
+                <div class="rounded-lg bg-[--bg-secondary] border border-[--border-color] p-2.5 text-center">
+                    <div class="text-lg font-bold text-[--accent-green]" id="statRetries">0/3</div>
+                    <div class="text-[10px] text-[--text-muted]">鑷剤杞</div>
+                </div>
+            </div>
+            
+            <div class="text-[10px] text-[--text-muted] text-center">
+                浠诲姟 ID: <span id="currentTaskId" class="mono">--</span>
+            </div>
+        </div>
+        </div>
+    </aside>
+    </div>
+
+    <main class="flex-1 glass-panel app-panel flex flex-col overflow-hidden min-w-0">
+        
+        <div class="h-[240px] border-b border-[--border-color] p-4 lab-canvas overflow-x-auto">
+            <div class="flex items-center mb-3">
+                <h3 class="panel-title">Agent 鐘舵€佹満</h3>
+            </div>
+            <div class="h-[calc(100%-34px)] flex items-center justify-center">
+            <svg id="stateMachineSvg" viewBox="0 0 1460 270" class="w-full h-full" style="min-width:1120px;">
+                <defs>
+                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="#94A3B8"/>
+                    </marker>
+                    <marker id="arrowhead-active" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="#3B82F6"/>
+                    </marker>
+                    <linearGradient id="nodeGradIdle" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#ffffff"/><stop offset="100%" style="stop-color:#f8fafc"/>
+                    </linearGradient>
+                    <linearGradient id="nodeGradActive" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#dbeafe"/><stop offset="100%" style="stop-color:#e0f2fe"/>
+                    </linearGradient>
+                    <linearGradient id="nodeGradComplete" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#dcfce7"/><stop offset="100%" style="stop-color:#ecfdf5"/>
+                    </linearGradient>
+                    <linearGradient id="nodeGradError" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#fee2e2"/><stop offset="100%" style="stop-color:#fef2f2"/>
+                    </linearGradient>
+                    <filter id="glow">
+                        <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                        <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                </defs>
+
+                <g id="arrows" fill="none" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arrowhead)" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M 170 108 L 215 108" class="state-arrow" data-from="IDLE" data-to="INTENT_ANALYSIS"/>
+                    <path d="M 365 108 L 410 108" class="state-arrow" data-from="INTENT_ANALYSIS" data-to="MODELING"/>
+                    <path d="M 540 108 L 585 108" class="state-arrow" data-from="MODELING" data-to="REVIEW"/>
+                    <path d="M 705 108 L 750 108" class="state-arrow" data-from="REVIEW" data-to="DETAILING"/>
+                    <path d="M 900 108 L 945 108" class="state-arrow" data-from="DETAILING" data-to="PRESENTATION"/>
+                    <path d="M 1120 108 L 1165 108" class="state-arrow" data-from="PRESENTATION" data-to="COMPLETED"/>
+                    <path d="M 645 142 L 645 220 L 500 220 L 500 142" class="state-arrow" data-from="REVIEW" data-to="MODELING"/>
+                    <path d="M 1040 142 L 1040 220 L 1245 220 L 1245 142" class="state-arrow" data-from="PRESENTATION" data-to="FAILED"/>
+                </g>
+
+                <g id="nodes">
+                    <g class="state-node" data-state="IDLE" transform="translate(30, 74)">
+                        <rect width="140" height="68" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+                        <text x="70" y="42" text-anchor="middle" fill="#334155" class="mono">IDLE</text>
+                    </g>
+                    <g class="state-node" data-state="INTENT_ANALYSIS" transform="translate(215, 74)">
+                        <rect width="150" height="68" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+                        <text x="75" y="42" text-anchor="middle" fill="#334155" class="mono">INTENT</text>
+                    </g>
+                    <g class="state-node" data-state="MODELING" transform="translate(410, 74)">
+                        <rect width="130" height="68" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+                        <text x="65" y="42" text-anchor="middle" fill="#334155" class="mono">MODELING</text>
+                    </g>
+                    <g class="state-node" data-state="REVIEW" transform="translate(585, 74)">
+                        <rect width="120" height="68" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+                        <text x="60" y="42" text-anchor="middle" fill="#334155" class="mono">REVIEW</text>
+                    </g>
+                    <g class="state-node" data-state="DETAILING" transform="translate(750, 74)">
+                        <rect width="150" height="68" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+                        <text x="75" y="42" text-anchor="middle" fill="#334155" class="mono">DETAILING</text>
+                    </g>
+                    <g class="state-node" data-state="PRESENTATION" transform="translate(945, 74)">
+                        <rect width="175" height="68" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+                        <text x="87" y="42" text-anchor="middle" fill="#334155" class="mono">PRESENT</text>
+                    </g>
+                    <g class="state-node" data-state="COMPLETED" transform="translate(1165, 74)">
+                        <rect width="165" height="68" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+                        <text x="82" y="42" text-anchor="middle" fill="#334155" class="mono">COMPLETED</text>
+                    </g>
+                    <g class="state-node" data-state="FAILED" transform="translate(1245, 186)">
+                        <rect width="140" height="68" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+                        <text x="70" y="42" text-anchor="middle" fill="#334155" class="mono">FAILED</text>
+                    </g>
+                </g>
+            </svg>
+            </div>
+        </div>
+
+        <div class="bottom-console border-t border-[--border-color] bg-white flex flex-col">
+            <div class="flex items-center justify-between px-4 py-2 border-b border-[--border-color]">
+                <div class="flex items-center gap-2">
+                    <button id="consoleTabLogs" class="console-tab active" onclick="switchConsoleTab('logs')">鎬濊€冩棩蹇?/button>
+                    <button id="consoleTabBuild" class="console-tab" onclick="switchConsoleTab('build')">鏋勫缓缁堢</button>
+                </div>
+                <button onclick="clearActiveConsole()" class="text-[12px] text-[--text-muted] hover:text-[--text-secondary] transition-colors">娓呯┖褰撳墠</button>
+            </div>
+            <div class="flex-1 min-h-0">
+                <div id="logsConsolePane" class="h-full min-h-0">
+                    <div id="logContainer" class="h-full overflow-y-auto p-4 space-y-2 font-mono text-[15px]">
+                        <div class="text-[--text-muted] text-center py-8">绛夊緟 Agent 鍚姩...</div>
+                    </div>
+                </div>
+                <div id="buildConsolePane" class="h-full min-h-0 hidden">
+                    <div id="buildTerminal" class="h-full overflow-y-auto p-3 font-mono text-[15px] font-medium bg-[#F8FAFC]">
+                        <span class="text-slate-500">绛夊緟鏋勫缓...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <aside class="right-panel glass-panel app-panel flex flex-col overflow-hidden">
+        <div id="workspaceTopProgressTrack"><div id="workspaceTopProgressBar"></div></div>
+        
+        <div class="p-4 border-b border-[--border-color]">
+            <div class="flex items-center justify-between mb-1">
+                <h2 class="panel-title">鏁板瓧宸ヤ綔鍖?/h2>
+                <span class="text-[10px] text-[--text-muted] mono">generated-workspace/</span>
+            </div>
+            <div class="flex items-center gap-3 mt-2">
+                <div class="flex-1">
+                    <div class="text-xs font-medium" id="workspaceStage">灏辩华</div>
+                    <div class="w-full h-[2px] bg-[--bg-secondary] rounded-full mt-1.5 overflow-hidden">
+                        <div id="progressBar" class="h-full bg-blue-500 rounded-full transition-all duration-500" style="width:0%"></div>
+                    </div>
+                </div>
+                <span class="text-xs font-semibold text-slate-500" id="progressPct">0%</span>
+            </div>
+        </div>
+
+        <div class="flex-shrink-0 border-b border-[--border-color]">
+            <div class="px-3 py-1.5 text-[10px] font-semibold text-[--text-muted] uppercase tracking-wider bg-[--bg-secondary]/50 flex items-center justify-between">
+                <span>鏂囦欢鏍?/span>
+                <span id="folderPathHint" class="normal-case text-[10px] mono text-slate-400">鏈敓鎴?/span>
+            </div>
+            <div id="fileTree" class="max-h-52 overflow-y-auto py-1 text-xs">
+                <div class="text-[--text-muted] text-center py-4 text-[11px]">鏆傛棤鐢熸垚鐨勬枃浠?/div>
+            </div>
+        </div>
+
+        <div class="flex-1 flex flex-col overflow-hidden min-h-0">
+            <div class="flex items-center justify-between px-3 py-1.5 border-b border-[--border-color] bg-[--bg-secondary]/30">
+                <span id="previewFileName" class="text-[10px] font-mono text-[--text-muted]">閫夋嫨鏂囦欢棰勮</span>
+            </div>
+            <pre id="codePreview" class="flex-1 overflow-auto p-3 m-0 text-[11px] leading-5 text-[--text-secondary] bg-[--bg-primary]/50 mono"><span class="text-[--text-muted]">// 浠ｇ爜棰勮灏嗗湪鐢熸垚鍚庢樉绀?..</span></pre>
+        </div>
+
+        <details class="border-t border-[--border-color]">
+            <summary class="px-4 py-2 text-xs font-semibold text-[--text-secondary] cursor-pointer hover:text-[--text-primary] transition-colors flex items-center gap-2">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                绾垫繁闃插尽鏋舵瀯
+            </summary>
+            <div class="mermaid-container mx-2 mb-2">
+                <div class="mermaid">
+graph TB
+    subgraph Layer0["绗?0 灞? LLM 杈撳嚭"]
+        OP[杈撳嚭瑙ｆ瀽鍣?br/>JSON Schema 鏍￠獙]
+    end
+    subgraph Layer1["绗?1 灞? 璇箟楠岃瘉鍣?]
+        AST[AST 鍒嗘瀽鍣╙
+        SEM[璇箟妫€鏌ュ櫒]
+    end
+    subgraph Layer2["绗?2 灞? 瀹夊叏娌欑"]
+        FS[鏂囦欢绯荤粺娌欑]
+        PS[杩涚▼娌欑]
+    end
+    subgraph Layer3["绗?3 灞? 鏋勫缓闂ㄧ"]
+        MV[Maven 缂栬瘧]
+        JT[JUnit5 娴嬭瘯]
+    end
+    subgraph Layer4["绗?4 灞? 鑷剤寰幆"]
+        EC[閿欒鍒嗙被鍣╙
+        FPG[淇鎻愮ず鐢熸垚鍣╙
+    end
+    OP --> AST --> SEM --> FS --> PS --> MV --> JT --> EC --> FPG
+    style Layer0 fill:#f8fafc,stroke:#94a3b8,color:#334155
+    style Layer1 fill:#f8fafc,stroke:#94a3b8,color:#334155
+    style Layer2 fill:#fff7f7,stroke:#d4a7a7,color:#5f4b4b
+    style Layer3 fill:#f7fcf9,stroke:#9fc3ab,color:#3e5f49
+    style Layer4 fill:#fffaf2,stroke:#d8b891,color:#6a563f
+                </div>
+            </div>
+        </details>
+    </aside>
+</div>
+
+<div id="clarificationModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden z-[90]">
+    <div class="absolute inset-0"></div>
+    <div class="absolute inset-x-4 top-8 bottom-8 md:inset-x-[15%] glass-panel border border-[--border-color] rounded-xl flex flex-col overflow-hidden">
+        <div class="p-4 border-b border-[--border-color] flex items-center justify-between">
+            <div>
+                <h3 class="text-sm font-semibold">闇€姹傛緞娓呭璇?/h3>
+                <p class="text-xs text-[--text-muted] mt-1">AI 浼氬厛鎻愰棶琛ュ厖鍏抽敭淇℃伅锛岀‘璁ゆ竻鏅板悗鍐嶈繘鍏ラ渶姹傚垎鏋愩€?/p>
+            </div>
+            <button onclick="closeClarificationDialog()" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-[--text-muted]">鍏抽棴</button>
+        </div>
+        <div id="clarificationMessages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-[--bg-primary]/40"></div>
+        <div class="p-3 border-t border-[--border-color] space-y-2 bg-[--bg-secondary]/40">
+            <div class="flex items-center gap-2">
+                <label for="clarificationFocus" class="text-xs text-[--text-muted] whitespace-nowrap">鎻愰棶鏂瑰悜</label>
+                <select id="clarificationFocus" onchange="onClarificationFocusChanged()" class="flex-1 bg-[--bg-secondary] border border-[--border-color] rounded-lg px-2 py-1.5 text-xs text-[--text-primary] focus:outline-none focus:border-[--accent-blue]">
+                    <option value="GENERAL">缁煎悎婢勬竻</option>
+                    <option value="PRODUCT">浜у搧涓庝笟鍔℃祦绋?/option>
+                    <option value="DESIGN">浜や簰涓庣晫闈㈣璁?/option>
+                    <option value="API">鎺ュ彛涓庡绾?/option>
+                    <option value="DATA">鏁版嵁妯″瀷涓庡瓨鍌?/option>
+                    <option value="NON_FUNCTIONAL">鎬ц兘涓庨潪鍔熻兘瑕佹眰</option>
+                </select>
+            </div>
+            <div class="flex gap-2">
+                <input id="clarificationInput" type="text" placeholder="琛ュ厖浣犵殑鍥炵瓟锛屾垨鍛婅瘔 AI 闇€姹傚凡瓒冲娓呮"
+                       class="flex-1 bg-[--bg-secondary] border border-[--border-color] rounded-lg px-3 py-2 text-sm text-[--text-primary] placeholder-[--text-muted] focus:outline-none focus:border-[--accent-blue]"/>
+                <button id="clarificationSendBtn" onclick="sendClarificationMessage()"
+                        class="px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700">
+                    鍙戦€?
+                </button>
+            </div>
+            <div class="flex gap-2 justify-between items-center">
+                <button id="clarificationFinishBtn" onclick="finishClarificationAndStart()"
+                        class="text-xs px-3 py-2 rounded-lg bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 disabled:bg-white disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed">
+                    鎴戠殑闇€姹傚凡缁忚冻澶熸竻妤氾紝缁撴潫瀵硅瘽寮€濮?
+                </button>
+                <button id="clarificationContinueBtn" onclick="continueAfterClarification()" disabled title="浠呭綋 AI 鍒ゆ柇闇€姹傚凡瓒冲瀹屾暣鍚庡彲鐢?
+                        class="text-xs px-3 py-2 rounded-lg bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-300 disabled:bg-white disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed">
+                    AI 璁や负宸插畬鏁达紝寮€濮嬮渶姹傚垎鏋?
+                </button>
+            </div>
+            <p class="text-[11px] text-[--text-muted] text-right">鍙充晶鎸夐挳闇€ AI 鍒ゆ柇闇€姹傚畬鏁村悗鎵嶄細鍚敤</p>
+        </div>
+    </div>
+</div>
+
+<div id="promptPreviewModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-[95]">
+    <div class="absolute inset-0"></div>
+    <div class="absolute inset-x-4 top-6 bottom-6 md:inset-x-[10%] glass-panel border border-[--border-color] rounded-xl flex flex-col overflow-hidden">
+        <div class="p-4 border-b border-[--border-color] flex items-center justify-between">
+            <div>
+                <h3 class="text-sm font-semibold">Prompt 棰勮涓庣紪杈?/h3>
+                <p class="text-xs text-[--text-muted] mt-1">纭寮€濮嬪墠鍙煡鐪嬪苟缂栬緫灏嗗彂閫佺粰闇€姹傚垎鏋愭ā鍨嬬殑鐢ㄦ埛鎻愮ず璇嶃€?/p>
+            </div>
+            <button onclick="closePromptPreviewDialog()" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-[--text-muted]">鍏抽棴</button>
+        </div>
+        <div class="flex-1 overflow-auto p-4 space-y-3 bg-[--bg-primary]/40">
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                <div class="rounded-lg border border-[--border-color] bg-[--bg-secondary]/60 p-3">
+                    <div class="text-xs font-semibold text-[--text-secondary] mb-2">System Prompt锛堝彧璇伙級</div>
+                    <pre id="analysisSystemPromptReadonly" class="text-xs leading-5 whitespace-pre-wrap text-[--text-muted] max-h-56 overflow-auto"></pre>
+                </div>
+                <div class="rounded-lg border border-[--border-color] bg-[--bg-secondary]/60 p-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-xs font-semibold text-[--text-secondary]">User Prompt锛堝彲缂栬緫锛?/div>
+                        <button onclick="restorePromptDraft()" class="text-[11px] px-2 py-1 rounded border border-[--border-color] hover:bg-[--bg-secondary] text-[--text-muted]">鎭㈠榛樿鑽夌</button>
+                    </div>
+                    <textarea id="analysisUserPromptEditor" rows="14"
+                              class="w-full bg-[--bg-secondary] border border-[--border-color] rounded-lg p-3 text-xs text-[--text-primary] placeholder-[--text-muted] resize-y focus:outline-none focus:border-[--accent-blue] focus:ring-1 focus:ring-[--accent-blue]/30 mono"></textarea>
+                </div>
+            </div>
+            <div class="rounded-lg border border-[--border-color] bg-[--bg-secondary]/60 p-3">
+                <div class="text-xs font-semibold text-[--text-secondary] mb-2">鏈€缁堝彂閫侀瑙堬紙System + User锛?/div>
+                <pre id="analysisCombinedPreview" class="text-xs leading-5 whitespace-pre-wrap text-[--text-primary] max-h-72 overflow-auto"></pre>
+            </div>
+        </div>
+        <div class="p-3 border-t border-[--border-color] bg-[--bg-secondary]/40 flex items-center justify-between gap-2">
+            <p class="text-[11px] text-[--text-muted]">纭鍚庡皢鎸夌紪杈戝悗鐨?User Prompt 杩涜闇€姹傚垎鏋愩€?/p>
+            <div class="flex items-center gap-2">
+                <button onclick="closePromptPreviewDialog()" class="text-xs px-3 py-2 rounded-lg border border-[--border-color] hover:bg-[--bg-secondary] text-[--text-muted]">鍙栨秷</button>
+                <button onclick="confirmPromptPreviewAndStart()" class="text-xs px-3 py-2 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 font-semibold border border-blue-200">纭骞跺紑濮?/button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+mermaid.initialize({ 
+    startOnLoad: true, 
+    theme: 'default',
+    themeVariables: {
+        primaryColor: '#e9f3ff',
+        primaryTextColor: '#1f2937',
+        primaryBorderColor: '#9fc4ec',
+        lineColor: '#89a5c3',
+        secondaryColor: '#f5faff',
+        tertiaryColor: '#edf5ff',
+        fontSize: '11px'
+    },
+    flowchart: { htmlLabels: true, useMaxWidth: true }
+});
+
+const STATE_ORDER = ['IDLE','INTENT_ANALYSIS','MODELING','REVIEW','DETAILING','PRESENTATION','COMPLETED','FAILED'];
+const STATE_NODE_LAYOUT = {
+    IDLE: { x: 30, y: 74 },
+    INTENT_ANALYSIS: { x: 215, y: 74 },
+    MODELING: { x: 410, y: 74 },
+    REVIEW: { x: 585, y: 74 },
+    DETAILING: { x: 750, y: 74 },
+    PRESENTATION: { x: 945, y: 74 },
+    COMPLETED: { x: 1165, y: 74 },
+    FAILED: { x: 1245, y: 186 }
+};
+const STATE_LABELS = {
+    IDLE: '空闲',
+    INTENT_ANALYSIS: '意图分析',
+    MODELING: '建模',
+    REVIEW: '审查',
+    DETAILING: '细化',
+    PRESENTATION: '写盘交付',
+    COMPLETED: '完成',
+    FAILED: '失败'
+};
+const STATE_COLORS = {
+    IDLE: { bg: '#e2e8f0', text: '#64748b', label: 'SLATE' },
+    INTENT_ANALYSIS: { bg: '#cfe0f2', text: '#4b6785', label: 'BLUE' },
+    MODELING: { bg: '#e2dff0', text: '#6d6288', label: 'PURPLE' },
+    REVIEW: { bg: '#fef3c7', text: '#8a6a1f', label: 'AMBER' },
+    DETAILING: { bg: '#dceadf', text: '#5d7b66', label: 'GREEN' },
+    PRESENTATION: { bg: '#dde4f2', text: '#5d6e86', label: 'INDIGO' },
+    COMPLETED: { bg: '#d7ebdf', text: '#507a63', label: 'GREEN' },
+    FAILED: { bg: '#f2dfdf', text: '#8c6666', label: 'RED' }
+};
+const STAGE_PROGRESS = {
+    IDLE: 0,
+    INTENT_ANALYSIS: 12,
+    MODELING: 35,
+    REVIEW: 55,
+    DETAILING: 75,
+    PRESENTATION: 90,
+    COMPLETED: 100,
+    FAILED: 100
+};
+
+const API_BASE = '';
+const SESSION_LLM_CONFIG_KEY = 'jap.llm.session.config';
+const LOCAL_WORKSPACE_PATH_KEY = 'jap.workspace.path';
+let ws = null;
+let wsReconnectTimer = null;
+let currentTaskId = null;
+let agentRunning = false;
+let healingRounds = 0;
+let startTime = null;
+let timerInterval = null;
+let heartbeatInterval = null;
+let lastHeartbeatTime = null;
+const workspaceFiles = {};
+const expandedFolders = new Set(['']);
+let selectedTreeFilePath = '';
+let selectedTreeFolderPath = '';
+let clarificationHistory = [];
+let clarificationReady = false;
+let clarificationStreaming = false;
+let pendingStartMode = null;
+let pendingRequirement = '';
+let skipClarificationMerge = false;
+let promptPreviewMode = null;
+let promptPreviewRequirement = '';
+let promptPreviewDefaultDraft = '';
+let activeConsoleTab = 'logs';
+
+const ANALYSIS_SYSTEM_PROMPT_PREVIEW = `You are J-AP (J-Architect-Pilot), an industrial-grade Java AI Agent specialized in requirement analysis.
+
+Your mission is to transform a user's natural language requirement into a structured RequirementSpec JSON.
+
+Output constraints:
+- Return ONLY valid JSON matching RequirementSpec
+- No markdown code blocks
+- No explanations outside JSON`;
+
+document.getElementById('faultToggle').addEventListener('change', function() {
+    document.getElementById('faultDetail').classList.toggle('hidden', !this.checked);
+});
+
+function normalizeInputText(value) {
+    return (value || '').trim();
+}
+
+function getSessionLlmConfig() {
+    try {
+        const raw = sessionStorage.getItem(SESSION_LLM_CONFIG_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.apiKey) return null;
+        return parsed;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setSessionLlmConfig(config) {
+    if (!config || !config.apiKey) return;
+    sessionStorage.setItem(SESSION_LLM_CONFIG_KEY, JSON.stringify(config));
+}
+
+function getWorkspacePathConfig() {
+    try {
+        const value = localStorage.getItem(LOCAL_WORKSPACE_PATH_KEY);
+        if (!value) return null;
+        const path = String(value).trim();
+        return path ? { path } : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setWorkspacePathConfig(pathValue) {
+    const path = String(pathValue || '').trim();
+    if (!path) {
+        localStorage.removeItem(LOCAL_WORKSPACE_PATH_KEY);
+        return;
+    }
+    localStorage.setItem(LOCAL_WORKSPACE_PATH_KEY, path);
+}
+
+function buildStructuredRequirement() {
+    const businessGoal = normalizeInputText(document.getElementById('businessGoalInput').value);
+    const coreEntities = normalizeInputText(document.getElementById('coreEntitiesInput').value);
+    const keyInterfaces = normalizeInputText(document.getElementById('keyInterfacesInput').value);
+    const boundaryConditions = normalizeInputText(document.getElementById('boundaryConditionsInput').value);
+    const nonFunctional = normalizeInputText(document.getElementById('nonFunctionalInput').value);
+    if (!businessGoal) return '';
+
+    const sections = [];
+    sections.push('銆愪笟鍔＄洰鏍囥€慭n' + businessGoal);
+    if (coreEntities) sections.push('銆愭牳蹇冨疄浣撱€慭n' + coreEntities);
+    if (keyInterfaces) sections.push('銆愬叧閿帴鍙ｃ€慭n' + keyInterfaces);
+    if (boundaryConditions) sections.push('銆愯竟鐣屾潯浠躲€慭n' + boundaryConditions);
+    if (nonFunctional) sections.push('銆愰潪鍔熻兘瑕佹眰銆慭n' + nonFunctional);
+    return sections.join('\n\n');
+}
+
+function syncRequirementInput(requirement) {
+    document.getElementById('requirementInput').value = requirement || '';
+}
+
+function buildAnalysisUserPromptDraft(requirement) {
+    const packageName = 'com.example.generated';
+    const databaseType = 'MYSQL';
+    return `Analyze the following requirement and generate a structured RequirementSpec.
+
+## User Requirement
+${requirement || ''}
+
+## Completeness Policy
+If the requirement is incomplete or ambiguous:
+- Make reasonable, production-ready assumptions.
+- Fill in missing API/data/constraint details with common best practices.
+- Keep design consistent and implementable.
+- Include key assumptions in the generated content (do not ask follow-up questions here).
+
+## Target Package
+${packageName}
+
+## Database Type
+${databaseType}
+
+Please analyze this requirement and return a valid JSON RequirementSpec.`;
+}
+
+function updatePromptPreviewCombined() {
+    const userPrompt = document.getElementById('analysisUserPromptEditor').value || '';
+    const combined = `=== System Prompt ===
+${ANALYSIS_SYSTEM_PROMPT_PREVIEW}
+
+=== User Prompt ===
+${userPrompt}`;
+    document.getElementById('analysisCombinedPreview').textContent = combined;
+}
+
+function openPromptPreviewDialog(mode, requirement) {
+    promptPreviewMode = mode;
+    promptPreviewRequirement = requirement || '';
+    promptPreviewDefaultDraft = buildAnalysisUserPromptDraft(promptPreviewRequirement);
+    document.getElementById('analysisSystemPromptReadonly').textContent = ANALYSIS_SYSTEM_PROMPT_PREVIEW;
+    document.getElementById('analysisUserPromptEditor').value = promptPreviewDefaultDraft;
+    updatePromptPreviewCombined();
+    document.getElementById('promptPreviewModal').classList.remove('hidden');
+}
+
+function closePromptPreviewDialog() {
+    document.getElementById('promptPreviewModal').classList.add('hidden');
+}
+
+function restorePromptDraft() {
+    document.getElementById('analysisUserPromptEditor').value = promptPreviewDefaultDraft || '';
+    updatePromptPreviewCombined();
+}
+
+function confirmPromptPreviewAndStart() {
+    const editedPrompt = normalizeInputText(document.getElementById('analysisUserPromptEditor').value);
+    if (!editedPrompt) {
+        addLog('错误', 'User Prompt 不能为空，请补充后再开始。', 'error');
+        return;
+    }
+    closePromptPreviewDialog();
+    syncRequirementInput(promptPreviewRequirement);
+    if (promptPreviewMode === 'design') {
+        startDesignOnly(true, true, promptPreviewRequirement, editedPrompt);
+    } else {
+        startFullPipeline(true, true, promptPreviewRequirement, editedPrompt);
+    }
+}
+
+function appendClarificationMessage(role, text) {
+    const container = document.getElementById('clarificationMessages');
+    const wrapper = document.createElement('div');
+    wrapper.className = role === 'assistant' ? 'flex justify-start' : 'flex justify-end';
+    const bubble = document.createElement('div');
+    bubble.className = role === 'assistant'
+        ? 'max-w-[90%] rounded-lg px-3 py-2 text-sm bg-[--bg-secondary] border border-[--border-color] text-[--text-primary] whitespace-pre-wrap'
+        : 'max-w-[90%] rounded-lg px-3 py-2 text-sm bg-blue-50 border border-blue-200 text-blue-700 whitespace-pre-wrap';
+    bubble.textContent = text || '';
+    wrapper.appendChild(bubble);
+    container.appendChild(wrapper);
+    container.scrollTop = container.scrollHeight;
+    return bubble;
+}
+
+function setClarificationStreamingState(streaming) {
+    clarificationStreaming = streaming;
+    const sendBtn = document.getElementById('clarificationSendBtn');
+    const finishBtn = document.getElementById('clarificationFinishBtn');
+    const continueBtn = document.getElementById('clarificationContinueBtn');
+    sendBtn.disabled = streaming;
+    finishBtn.disabled = streaming;
+    continueBtn.disabled = streaming || !clarificationReady;
+}
+
+function parseSseData(raw) {
+    if (raw == null || raw === '') return '';
+    try { return JSON.parse(raw); } catch (e) { return raw; }
+}
+
+function dispatchSseEvent(eventName, payload, streamState) {
+    if (eventName === 'token') {
+        const token = typeof payload === 'string' ? payload : '';
+        streamState.buffer += token;
+        streamState.bubble.textContent = streamState.buffer;
+        return;
+    }
+    if (eventName === 'done') {
+        const done = typeof payload === 'object' && payload !== null ? payload : { text: String(payload || '') };
+        const text = (done.text || streamState.buffer || '').trim();
+        streamState.buffer = text;
+        streamState.bubble.textContent = text;
+        clarificationHistory.push({ role: 'assistant', content: text });
+        clarificationReady = Boolean(done.ready);
+        setClarificationStreamingState(false);
+        if (clarificationReady) {
+            addLog('系统', '需求澄清完成，可以开始需求分析。', 'success');
+        }
+        return;
+    }
+    if (eventName === 'error') {
+        const msg = typeof payload === 'object' && payload !== null ? (payload.message || '婢勬竻璇锋眰澶辫触') : String(payload || '婢勬竻璇锋眰澶辫触');
+        throw new Error(msg);
+    }
+}
+
+function handleSseChunk(chunk, streamState) {
+    streamState.raw += chunk.replace(/\r/g, '');
+    let idx = streamState.raw.indexOf('\n\n');
+    while (idx >= 0) {
+        const block = streamState.raw.slice(0, idx);
+        streamState.raw = streamState.raw.slice(idx + 2);
+        let eventName = 'message';
+        const dataLines = [];
+        for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        dispatchSseEvent(eventName, parseSseData(dataLines.join('\n')), streamState);
+        idx = streamState.raw.indexOf('\n\n');
+    }
+}
+
+function openClarificationDialog(requirement, mode) {
+    pendingRequirement = requirement;
+    pendingStartMode = mode;
+    skipClarificationMerge = false;
+    clarificationHistory = [];
+    clarificationReady = false;
+    document.getElementById('clarificationMessages').innerHTML = '';
+    document.getElementById('clarificationInput').value = '';
+    document.getElementById('clarificationFocus').value = 'GENERAL';
+    setClarificationStreamingState(false);
+    document.getElementById('clarificationModal').classList.remove('hidden');
+    appendClarificationMessage('assistant', '我会先做需求澄清。你也可以点击左下按钮直接开始。');
+    streamClarification('');
+}
+
+function closeClarificationDialog() {
+    if (clarificationStreaming) return;
+    document.getElementById('clarificationModal').classList.add('hidden');
+}
+
+async function streamClarification(userMessage) {
+    if (clarificationStreaming) return;
+    const taskLlm = buildTaskLlmConfig();
+    if (!taskLlm) {
+        addLog('错误', '当前会话未配置 LLM API Key，无法进行需求澄清。', 'error');
+        openSettings();
+        return;
+    }
+    setClarificationStreamingState(true);
+    const streamState = { bubble: appendClarificationMessage('assistant', ''), buffer: '', raw: '' };
+    const focus = document.getElementById('clarificationFocus').value || 'GENERAL';
+    try {
+        const response = await fetch(API_BASE + '/api/v1/clarification/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                requirement: pendingRequirement,
+                history: clarificationHistory,
+                userMessage: userMessage,
+                focus: focus,
+                llm: taskLlm
+            })
+        });
+        if (!response.ok || !response.body) throw new Error('婢勬竻鎺ュ彛澶辫触: HTTP ' + response.status);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            handleSseChunk(decoder.decode(value, { stream: true }), streamState);
+        }
+    } catch (error) {
+        streamState.bubble.textContent = '澄清失败: ' + error.message;
+        addLog('错误', '澄清请求失败: ' + error.message, 'error');
+    } finally {
+        setClarificationStreamingState(false);
+    }
+}
+
+async function sendClarificationMessage(presetMessage) {
+    if (clarificationStreaming) return;
+    const input = document.getElementById('clarificationInput');
+    const text = normalizeInputText(presetMessage || input.value);
+    if (!text) return;
+    appendClarificationMessage('user', text);
+    clarificationHistory.push({ role: 'user', content: text, synthetic: Boolean(presetMessage) });
+    input.value = '';
+    await streamClarification(text);
+}
+
+function onClarificationFocusChanged() {
+    if (clarificationStreaming || clarificationReady || clarificationHistory.length === 0) return;
+    sendClarificationMessage('请按我当前选择的提问方向继续。');
+}
+
+function finishClarificationAndStart() {
+    if (clarificationStreaming) return;
+    appendClarificationMessage('user', '我的需求已经足够清晰，结束对话并开始分析。');
+    skipClarificationMerge = true;
+    clarificationReady = true;
+    setClarificationStreamingState(false);
+    continueAfterClarification();
+}
+
+function buildRequirementWithClarification(baseRequirement) {
+    const qa = clarificationHistory
+        .filter(x => x && x.role === 'user' && x.content && !x.synthetic)
+        .map(x => x.content.trim())
+        .filter(x => x && x !== '我的需求已经足够清晰，结束对话并开始分析。')
+        .join('\n');
+    if (!qa) return baseRequirement;
+    return baseRequirement + '\n\n銆愮敤鎴疯ˉ鍏呬俊鎭€慭n' + qa;
+}
+
+function continueAfterClarification() {
+    if (clarificationStreaming) return;
+    const merged = skipClarificationMerge ? pendingRequirement : buildRequirementWithClarification(pendingRequirement);
+    syncRequirementInput(merged);
+    document.getElementById('clarificationModal').classList.add('hidden');
+    openPromptPreviewDialog(pendingStartMode === 'design' ? 'design' : 'full', merged);
+}
+
+function updateWsStatus(status) {
+    const dot = document.getElementById('wsDot');
+    const text = document.getElementById('wsStatus');
+    dot.className = 'dot ' + status;
+    if (status === 'connected') {
+        text.textContent = 'WebSocket: connected';
+        text.style.color = '#10b981';
+    } else if (status === 'connecting') {
+        text.textContent = 'WebSocket: connecting...';
+        text.style.color = '#f59e0b';
+    } else {
+        text.textContent = 'WebSocket: disconnected';
+        text.style.color = '#64748b';
+    }
+}
+
+function connectWebSocket(taskId) {
+    if (taskId !== undefined && taskId !== null) {
+        currentTaskId = taskId;
+    }
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+    if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+    }
+
+    updateWsStatus('connecting');
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+    ws.onopen = () => {
+        updateWsStatus('connected');
+        console.log('Native WebSocket connected');
+    };
+
+    ws.onmessage = (messageEvent) => {
+        try {
+            const event = JSON.parse(messageEvent.data);
+            const eventTaskId = event?.data?.taskId ?? null;
+            if (eventTaskId !== currentTaskId) {
+                return;
+            }
+            handleStompEvent(event);
+        } catch (error) {
+            console.error('WebSocket message parse failed:', error);
+        }
+    };
+
+    ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        updateWsStatus('disconnected');
+    };
+
+    ws.onclose = () => {
+        updateWsStatus('disconnected');
+        ws = null;
+        wsReconnectTimer = setTimeout(() => {
+            connectWebSocket(currentTaskId);
+        }, 3000);
+    };
+}
+
+function connectWebSocketForTask(taskId) {
+    currentTaskId = taskId || null;
+    connectWebSocket(currentTaskId);
+}
+
+function handleStompEvent(event) {
+    console.log('WebSocket event:', event);
+    
+    switch(event.type) {
+        case 'STAGE_CHANGED':
+            handleStageChanged(event.data);
+            break;
+        case 'LOG_ADDED':
+            handleLogAdded(event.data);
+            break;
+        case 'TASK_FINISHED':
+            handleTaskFinished(event.data);
+            break;
+        case 'PROGRESS_UPDATED':
+            handleProgressUpdated(event.data);
+            break;
+        case 'FILE_GENERATED':
+            handleFileGenerated(event.data);
+            break;
+        case 'ERROR_DETECTED':
+            handleErrorDetected(event.data);
+            break;
+        case 'FIX_ATTEMPTED':
+            handleFixAttempted(event.data);
+            break;
+        case 'PIPELINE_COMPLETED':
+            handlePipelineCompleted(event.data);
+            break;
+        case 'MANUAL_INTERVENTION_REQUIRED':
+            handleManualIntervention(event.data);
+            break;
+        case 'DESIGN_COMPLETE':
+            handleDesignComplete(event.data);
+            break;
+        case 'BUILD_OUTPUT':
+            handleBuildOutput(event.data);
+            break;
+        case 'PROGRESS_HEARTBEAT':
+            handleProgressHeartbeat(event.data);
+            break;
+        case 'PROTOTYPE_GEN_PROGRESS':
+            handlePrototypeProgress(event.data);
+            break;
+    }
+}
+
+function handleBuildOutput(data) {
+    addBuildOutput(data.line, data.isError);
+}
+
+function handleProgressHeartbeat(data) {
+    setProgress(data.percentage, data.currentAction);
+    updateLlmWorkingStatus(data.currentAction);
+    lastHeartbeatTime = Date.now();
+}
+
+function handlePrototypeProgress(data) {
+    const indicator = document.getElementById('llmWorkingIndicator');
+    const text = document.getElementById('llmWorkingText');
+    
+    if (indicator && text) {
+        indicator.classList.remove('hidden');
+        indicator.classList.add('flex');
+        
+        let status = '鐢熸垚 HTML 鍘熷瀷涓?..';
+        if (data.complete) {
+            status = 'HTML 鍘熷瀷鐢熸垚瀹屾垚';
+        } else if (data.partial) {
+            status = 'HTML 鍘熷瀷閮ㄥ垎瀹屾垚 (' + data.charsWritten + ' 瀛楃)';
+        } else if (data.percentage > 0) {
+            status = '鐢熸垚涓?' + data.percentage + '% (' + data.charsWritten + ' 瀛楃)';
+        }
+        text.textContent = status;
+    }
+    
+    if (data.complete || data.partial) {
+        addLog(data.complete ? '鎴愬姛' : '璀﹀憡', 
+            'HTML 鍘熷瀷' + (data.complete ? '鐢熸垚瀹屾垚' : '閮ㄥ垎瀹屾垚'), 
+            data.complete ? 'success' : 'warn',
+            '鍏卞啓鍏?' + data.charsWritten + ' 瀛楃');
+    }
+}
+
+function updateLlmWorkingStatus(action) {
+    const indicator = document.getElementById('llmWorkingIndicator');
+    const text = document.getElementById('llmWorkingText');
+    
+    if (action && agentRunning) {
+        indicator.classList.remove('hidden');
+        indicator.classList.add('flex');
+        text.textContent = action.length > 20 ? action.substring(0, 20) + '...' : action;
+    } else {
+        indicator.classList.add('hidden');
+        indicator.classList.remove('flex');
+    }
+}
+
+function startHeartbeatMonitor() {
+    stopHeartbeatMonitor();
+    lastHeartbeatTime = Date.now();
+    
+    heartbeatInterval = setInterval(() => {
+        const now = Date.now();
+        const elapsed = now - lastHeartbeatTime;
+        
+        if (elapsed > 10000 && agentRunning) {
+            updateLlmWorkingStatus('绛夊緟 LLM 鍝嶅簲...');
+        }
+    }, 5000);
+}
+
+function stopHeartbeatMonitor() {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+    updateLlmWorkingStatus(null);
+}
+
+function handleDesignComplete(data) {
+    designComplete = true;
+    addLog('系统', '设计文件生成完成', 'success', `生成了 ${data.designFilesCount || 0} 个设计文件。`);
+    
+    if (data.designFiles && data.designFiles.length > 0) {
+        data.designFiles.forEach(path => {
+            if (!workspaceFiles[path]) {
+                workspaceFiles[path] = `# Generated file\n\n${path}`;
+            }
+        });
+        renderFileTree(workspaceFiles);
+
+        const prdFile = data.designFiles.find(f => f.includes('01_'));
+        const prototypeFile = data.designFiles.find(f => /\.(html?|xhtml)$/i.test(f));
+        if (prototypeFile) {
+            selectFile(prototypeFile);
+        } else if (prdFile) {
+            selectFile(prdFile);
+        }
+    }
+
+    if (currentTaskId) {
+        syncTaskFileList(currentTaskId);
+    }
+}
+
+function handleStageChanged(data) {
+    const to = data.to || 'IDLE';
+    activateState(to);
+    setProgress(STAGE_PROGRESS[to] ?? 0, STATE_LABELS[to] || to);
+    addLog('状态', `状态流转: ${STATE_LABELS[data.from] || data.from} -> ${STATE_LABELS[to] || to}`, 'info');
+}
+
+function handleTaskFinished(data) {
+    stopAgent();
+    const status = data?.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED';
+    activateState(status);
+    setProgress(100, STATE_LABELS[status] || status);
+
+    if (Array.isArray(data?.artifacts)) {
+        data.artifacts.forEach((name) => {
+            const fileName = String(name || '').trim();
+            if (!fileName) return;
+            if (!workspaceFiles[fileName]) {
+                workspaceFiles[fileName] = `# Generated artifact\n\nFile: ${fileName}`;
+            }
+        });
+        renderFileTree(workspaceFiles);
+    }
+
+    if (status === 'COMPLETED') {
+        addLog('成功', '任务完成，交付物已写入目标目录。', 'success');
+        return;
+    }
+
+    const errSummary = Array.isArray(data?.errors) ? data.errors.join('\n') : '任务执行失败';
+    addLog('错误', '任务失败', 'error', errSummary);
+}
+
+function handleLogAdded(data) {
+    const category = mapLogType(data.logType);
+    addLog(data.logType || '淇℃伅', data.title || '', category, data.summary);
+}
+
+function handleProgressUpdated(data) {
+    setProgress(data.percentage, data.stageName);
+}
+
+function handleFileGenerated(data) {
+    const path = data.path;
+    workspaceFiles[path] = `// 鐢熸垚鐨勬枃浠? ${path}\n// 澶у皬: ${data.size} 瀛楄妭\n// 鍐呭鍔犺浇涓?..`;
+    hydrateWorkspaceFile(path);
+    renderFileTree(workspaceFiles);
+    addLog('鐢熸垚', `宸茬敓鎴? ${path}`, 'info');
+}
+
+function buildPreviewUrl(path) {
+    const normalized = String(path || '').replace(/\\/g, '/');
+    return API_BASE + '/api/v1/preview/' + encodeURI(normalized);
+}
+
+async function hydrateWorkspaceFile(path) {
+    if (!path) return;
+    try {
+        const resp = await fetch(buildPreviewUrl(path));
+        if (!resp.ok) return;
+        const contentType = resp.headers.get('content-type') || '';
+        if (contentType.includes('text') || contentType.includes('json') || contentType.includes('xml') || contentType.includes('yaml') || contentType.includes('javascript')) {
+            const text = await resp.text();
+            workspaceFiles[path] = text;
+            if (document.getElementById('previewFileName').textContent === path) {
+                selectFile(path);
+            }
+        }
+    } catch (_) {
+    }
+}
+
+async function syncTaskFileList(taskId) {
+    if (!taskId) return;
+    try {
+        const resp = await fetch(API_BASE + '/api/v1/tasks/' + encodeURIComponent(taskId) + '/files');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const flat = [];
+        const walk = (nodes) => {
+            (nodes || []).forEach(n => {
+                if (n && n.children && Array.isArray(n.children) && n.children.length > 0) {
+                    walk(n.children);
+                } else if (n && n.path) {
+                    flat.push(n.path);
+                }
+            });
+        };
+        walk(data.files);
+        flat.forEach(path => {
+            if (!workspaceFiles[path]) {
+                workspaceFiles[path] = `// 鐢熸垚鐨勬枃浠? ${path}\n// 鍐呭鍔犺浇涓?..`;
+                hydrateWorkspaceFile(path);
+            }
+        });
+        renderFileTree(workspaceFiles);
+    } catch (_) {
+    }
+}
+
+function handleErrorDetected(data) {
+    addLog('閿欒', `${data.category}: ${data.message}`, 'error',
+        `鏂囦欢: ${data.file}:${data.line}\n${data.suggestion || ''}`);
+}
+
+function handleFixAttempted(data) {
+    healingRounds = data.round;
+    document.getElementById('statRetries').textContent = `${healingRounds}/3`;
+    addLog('淇', `淇灏濊瘯 #${data.round} - ${data.patchType}`, 'fix',
+        `鐩爣: ${data.targetFile}\n宸插簲鐢? ${data.fixApplied}`);
+}
+
+function handlePipelineCompleted(data) {
+    stopAgent();
+    activateState('COMPLETED');
+    setProgress(100, '完成');
+    const outcomeText = data.outcome === 'SUCCESS' ? '成功' : data.outcome === 'HEALED' ? '已自愈' : '失败';
+    addLog('流水线', `流水线${outcomeText}`, 'success',
+        `耗时: ${data.totalDurationMs}ms\n文件数: ${data.filesGenerated}\n自愈轮次: ${data.healingRounds}`);
+}
+
+function handleManualIntervention(data) {
+    stopAgent();
+    activateState('FAILED');
+    addLog('系统', '需要人工介入', 'error', data.humanReadableSummary);
+}
+
+function mapLogType(type) {
+    const map = {
+        'SYSTEM': 'system',
+        'INFO': 'info',
+        'INNER': 'inner',
+        'OUTER': 'outer',
+        'SUCCESS': 'success',
+        'ERROR': 'error',
+        'WARN': 'warn',
+        'FIX': 'fix'
+    };
+    return map[type] || 'info';
+}
+
+function setProgress(pct, stage) {
+    const circle = document.getElementById('progressCircle');
+    if (circle) {
+        const circumference = 97.39;
+        circle.style.strokeDashoffset = circumference - (pct / 100) * circumference;
+    }
+    
+    document.getElementById('progressBar').style.width = pct + '%';
+    const topBar = document.getElementById('workspaceTopProgressBar');
+    if (topBar) topBar.style.width = pct + '%';
+    document.getElementById('progressPct').textContent = Math.round(pct) + '%';
+    document.getElementById('workspaceStage').textContent = stage || '';
+}
+
+function normalizeStateMachineLayout() {
+    document.querySelectorAll('.state-node').forEach(node => {
+        const state = node.dataset.state;
+        const pos = STATE_NODE_LAYOUT[state];
+        if (!pos) return;
+        node.setAttribute('transform', `translate(${pos.x}, ${pos.y})`);
+    });
+}
+
+function activateState(stateName) {
+    normalizeStateMachineLayout();
+    document.querySelectorAll('.state-node').forEach(node => {
+        const s = node.dataset.state;
+        const isActive = s === stateName;
+        const stateIndex = STATE_ORDER.indexOf(stateName);
+        const nodeIndex = STATE_ORDER.indexOf(s);
+        const isCompleted = nodeIndex > -1 && stateIndex > -1 && nodeIndex < stateIndex && s !== 'FAILED' && !(stateName === 'FAILED' && s === 'COMPLETED');
+        
+        node.classList.toggle('active', isActive);
+        node.classList.toggle('completed', isCompleted && !isActive);
+        
+        const rect = node.querySelector('rect');
+        if (isActive) {
+            rect.setAttribute('fill', '#DBEAFE');
+            rect.setAttribute('stroke', '#3B82F6');
+            rect.setAttribute('stroke-width', '1.5');
+            rect.style.filter = '';
+        } else if (isCompleted) {
+            rect.setAttribute('fill', '#FFFFFF');
+            rect.setAttribute('stroke', '#86EFAC');
+            rect.setAttribute('stroke-width', '1');
+            rect.style.filter = '';
+        } else {
+            rect.setAttribute('fill', '#FFFFFF');
+            rect.setAttribute('stroke', '#E2E8F0');
+            rect.setAttribute('stroke-width', '1');
+            rect.style.filter = '';
+        }
+        
+        const texts = node.querySelectorAll('text');
+        texts.forEach(t => {
+            t.setAttribute('fill', isActive ? '#1E3A8A' : isCompleted ? '#94A3B8' : '#94A3B8');
+        });
+    });
+
+    document.querySelectorAll('.state-arrow').forEach(arrow => {
+        arrow.classList.remove('active');
+        arrow.setAttribute('marker-end', 'url(#arrowhead)');
+        arrow.setAttribute('stroke', '#94A3B8');
+    });
+
+    const label = document.getElementById('currentStateLabel');
+    if (label) {
+        label.textContent = STATE_LABELS[stateName] || stateName;
+        const colorInfo = STATE_COLORS[stateName];
+        if (colorInfo) {
+            label.className = 'text-xs px-2 py-0.5 rounded-full font-bold mono';
+            label.style.backgroundColor = colorInfo.bg + '33';
+            label.style.color = colorInfo.text;
+            label.style.border = '1px solid ' + colorInfo.bg + '66';
+        }
+    }
+
+    const gs = document.getElementById('globalStatus');
+    gs.textContent = stateName === 'COMPLETED' ? '流程完成' : STATE_LABELS[stateName] || stateName;
+    gs.style.color = stateName === 'COMPLETED' ? '#507a63' : stateName === 'FAILED' ? '#8c6666' : '#64748b';
+}
+
+function switchConsoleTab(tab) {
+    const logsPane = document.getElementById('logsConsolePane');
+    const buildPane = document.getElementById('buildConsolePane');
+    const tabLogs = document.getElementById('consoleTabLogs');
+    const tabBuild = document.getElementById('consoleTabBuild');
+    if (!logsPane || !buildPane || !tabLogs || !tabBuild) return;
+
+    activeConsoleTab = tab === 'build' ? 'build' : 'logs';
+    const showBuild = activeConsoleTab === 'build';
+    logsPane.classList.toggle('hidden', showBuild);
+    buildPane.classList.toggle('hidden', !showBuild);
+    tabLogs.classList.toggle('active', !showBuild);
+    tabBuild.classList.toggle('active', showBuild);
+}
+
+function clearActiveConsole() {
+    if (activeConsoleTab === 'build') clearBuildTerminal();
+    else clearLogs();
+}
+
+function addLog(type, message, category, extra) {
+    const container = document.getElementById('logContainer');
+    if (container.querySelector('.text-\[--text-muted\]')) container.innerHTML = '';
+
+    const colors = {
+        'system': { bg: '#f8fafc', border: '#d0dae5', dot: '#7b8794' },
+        'info':   { bg: '#f6faff', border: '#b8cbe1', dot: '#6b8caf' },
+        'inner':  { bg: '#f6faff', border: '#c0cfdf', dot: '#7d95ad' },
+        'outer':  { bg: '#fdf9f2', border: '#dfcfb7', dot: '#9c8966' },
+        'success':{ bg: '#f6fbf7', border: '#c8ddcf', dot: '#6f8e7b' },
+        'error':  { bg: '#fff8f8', border: '#e2c8c8', dot: '#9f7373' },
+        'warn':   { bg: '#fdf9f2', border: '#dfcfb7', dot: '#9c8966' },
+        'fix':    { bg: '#faf8fd', border: '#d8cfe4', dot: '#84719b' },
+    };
+    const cfg = colors[category] || colors.info;
+    const ts = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+    const entry = document.createElement('div');
+    entry.className = 'log-entry rounded-lg p-3 border';
+    entry.style.backgroundColor = cfg.bg;
+    entry.style.borderColor = cfg.border;
+    entry.innerHTML = `
+        <div class="flex items-start gap-2.5">
+            <span class="flex-shrink-0 w-1.5 h-1.5 rounded-full mt-1.5" style="background:${cfg.dot}"></span>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-[10px] font-semibold uppercase" style="color:${cfg.dot}">${type}</span>
+                    <span class="text-[10px] text-[--text-muted]">${ts}</span>
+                </div>
+                <div class="text-[--text-primary] leading-relaxed whitespace-pre-wrap">${escapeHtml(message)}</div>
+                ${extra ? `<div class="mt-1.5 text-[10px] text-[--text-muted] border-t border-[--border-color]/30 pt-1.5 mono">${escapeHtml(extra)}</div>` : ''}
+            </div>
+        </div>`;
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearLogs() {
+    document.getElementById('logContainer').innerHTML = '<div class="text-[--text-muted] text-center py-8">日志已清空。</div>';
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderFileTree(files) {
+    const container = document.getElementById('fileTree');
+    const folderHint = document.getElementById('folderPathHint');
+    if (!files || Object.keys(files).length === 0) {
+        container.innerHTML = '<div class="text-[--text-muted] text-center py-4 text-[11px]">暂无生成文件</div>';
+        if (folderHint) folderHint.textContent = '未生成';
+        return;
+    }
+
+    const paths = Object.keys(files).sort();
+    const folderSet = new Set();
+    paths.forEach(path => {
+        const normalized = path.replace(/\\/g, '/');
+        const parts = normalized.split('/');
+        for (let i = 1; i < parts.length; i++) {
+            folderSet.add(parts.slice(0, i).join('/'));
+        }
+    });
+    const roots = Array.from(new Set(paths.map(p => p.replace(/\\/g, '/').split('/')[0]))).sort();
+    if (folderHint) folderHint.textContent = roots.join(', ');
+    roots.forEach(root => {
+        if (!expandedFolders.has(root) && selectedTreeFolderPath === '' && selectedTreeFilePath === '') {
+            expandedFolders.add(root);
+        }
+    });
+
+    const tree = { folders: {}, files: [] };
+    paths.forEach(path => {
+        const normalized = path.replace(/\\/g, '/');
+        const parts = normalized.split('/');
+        let current = tree;
+        for (let i = 0; i < parts.length - 1; i++) {
+            const part = parts[i];
+            if (!current.folders[part]) current.folders[part] = { folders: {}, files: [] };
+            current = current.folders[part];
+        }
+        current.files.push(normalized);
+    });
+
+    function encodePath(path) {
+        return encodeURIComponent(path).replace(/'/g, '%27');
+    }
+
+    function renderNode(node, parentPath, depth) {
+        let html = '';
+        const folderNames = Object.keys(node.folders).sort();
+        folderNames.forEach(folderName => {
+            const fullPath = parentPath ? `${parentPath}/${folderName}` : folderName;
+            const expanded = expandedFolders.has(fullPath);
+            const selectedClass = selectedTreeFolderPath === fullPath ? ' selected' : '';
+            html += `
+            <div class="folder-tree-item${selectedClass} flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer mx-1" style="padding-left:${8 + depth * 14}px" onclick="toggleFolderByEncoded('${encodePath(fullPath)}', event)">
+                <span class="text-[11px] text-slate-500">${expanded ? '▼' : '▶'}</span>
+                <span class="text-[11px]">📁</span>
+                <span class="truncate text-[11px]">${escapeHtml(folderName)}</span>
+            </div>`;
+            if (expanded) {
+                html += renderNode(node.folders[folderName], fullPath, depth + 1);
+            }
+        });
+
+        node.files.sort().forEach(filePath => {
+            const fileName = filePath.split('/').pop();
+            const selectedClass = selectedTreeFilePath === filePath ? ' selected' : '';
+            html += `
+            <div class="file-tree-item${selectedClass} flex items-center gap-2 px-2 py-1 rounded cursor-pointer mx-1" style="padding-left:${10 + depth * 14}px" onclick="selectFileByEncoded('${encodePath(filePath)}', event)">
+                ${getFileIcon(fileName)}
+                <span class="truncate mono text-[11px]">${escapeHtml(fileName)}</span>
+            </div>`;
+        });
+        return html;
+    }
+
+    container.innerHTML = '<div class="px-2 py-1">' + renderNode(tree, '', 0) + '</div>';
+}
+
+function getFileIcon(name) {
+    if (name.endsWith('.java')) return '<span class="text-[11px] text-amber-700">J</span>';
+    if (name.endsWith('.xml')) return '<span class="text-[11px] text-rose-700">X</span>';
+    if (name.endsWith('.yml') || name.endsWith('.yaml')) return '<span class="text-[11px] text-cyan-700">Y</span>';
+    if (name.endsWith('.md')) return '<span class="text-[11px] text-slate-700">M</span>';
+    return '<span class="text-[11px] text-slate-500">F</span>';
+}
+
+function selectFileByEncoded(encodedPath, evt) {
+    const path = decodeURIComponent(encodedPath || '');
+    selectFile(path, evt);
+}
+
+function toggleFolderByEncoded(encodedPath, evt) {
+    const path = decodeURIComponent(encodedPath || '');
+    toggleFolder(path, evt);
+}
+
+function toggleFolder(folderPath, evt) {
+    if (expandedFolders.has(folderPath)) expandedFolders.delete(folderPath);
+    else expandedFolders.add(folderPath);
+    selectedTreeFolderPath = folderPath;
+    selectedTreeFilePath = '';
+    renderFileTree(workspaceFiles);
+    showFolderPreview(folderPath);
+    if (evt && evt.stopPropagation) evt.stopPropagation();
+}
+
+function showFolderPreview(folderPath) {
+    const normalizedFolder = (folderPath || '').replace(/\\/g, '/');
+    const filesInFolder = Object.keys(workspaceFiles)
+        .map(k => k.replace(/\\/g, '/'))
+        .filter(p => p.startsWith(normalizedFolder + '/'))
+        .sort();
+    document.getElementById('previewFileName').textContent = `鏂囦欢澶? ${normalizedFolder}`;
+    const preview = document.getElementById('codePreview');
+    if (filesInFolder.length === 0) {
+        preview.innerHTML = '<span class="text-[--text-muted]">// 璇ユ枃浠跺す涓嬫殏鏃犳枃浠?/span>';
+        return;
+    }
+    const listHtml = filesInFolder.map(p => {
+        const n = p.split('/').pop();
+        return `<div class="flex items-center justify-between py-1 border-b border-slate-100 last:border-0">
+            <span class="mono text-[11px]">${escapeHtml(n)}</span>
+            <button class="text-[11px] px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50" onclick="selectFileByEncoded('${encodeURIComponent(p).replace(/'/g, '%27')}', event)">棰勮</button>
+        </div>`;
+    }).join('');
+    preview.innerHTML = `<div class="text-xs text-slate-500 mb-2">璺緞: ${escapeHtml(normalizedFolder)}</div><div>${listHtml}</div>`;
+}
+
+function selectFile(path, evt) {
+    selectedTreeFilePath = path;
+    selectedTreeFolderPath = '';
+    renderFileTree(workspaceFiles);
+    
+    const content = workspaceFiles[path] || '// 文件未加载';
+    document.getElementById('previewFileName').textContent = path;
+    
+    const previewContainer = document.getElementById('codePreview');
+    const lowerPath = path.toLowerCase();
+    
+    if (lowerPath.endsWith('.html') || lowerPath.endsWith('.htm')) {
+        const previewUrl = buildPreviewUrl(path);
+        previewContainer.innerHTML = `
+            <div class="mb-2 flex items-center justify-between">
+                <span class="text-xs text-[--text-muted]">HTML 棰勮</span>
+                <a href="${previewUrl}" target="_blank" class="text-xs text-blue-600 hover:text-blue-700">鍦ㄦ柊绐楀彛鎵撳紑</a>
+            </div>
+            <iframe src="${previewUrl}" class="w-full h-64 border border-[--border-color] rounded-lg bg-white"></iframe>
+            <div class="mt-2 text-xs text-[--text-muted]">婧愪唬鐮?</div>
+            <pre class="mt-1 text-[10px] overflow-auto max-h-40">${escapeHtml(content)}</pre>
+        `;
+    } else if (lowerPath.endsWith('.md')) {
+        previewContainer.innerHTML = `
+            <div class="mb-2 text-xs text-[--text-muted]">Markdown 鏂囨。</div>
+            <div class="prose prose-invert prose-sm max-w-none overflow-auto">
+                ${renderMarkdown(content)}
+            </div>
+        `;
+    } else if (lowerPath.endsWith('.java')) {
+        previewContainer.innerHTML = highlightJava(content, path);
+    } else if (lowerPath.endsWith('.xml') || lowerPath.endsWith('.json') || lowerPath.endsWith('.yml')) {
+        previewContainer.innerHTML = `<pre class="text-[11px] overflow-auto">${escapeHtml(content)}</pre>`;
+    } else {
+        previewContainer.innerHTML = `<pre class="text-[11px] overflow-auto">${escapeHtml(content)}</pre>`;
+    }
+    if (evt && evt.stopPropagation) evt.stopPropagation();
+}
+
+function renderMarkdown(md) {
+    let html = escapeHtml(md);
+    
+    html = html.replace(/^### (.+)$/gm, '<h3 class="text-base font-bold text-[--text-primary] mt-4 mb-2">$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2 class="text-lg font-bold text-[--text-primary] mt-4 mb-2">$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold text-[--text-primary] mt-4 mb-3 pb-2 border-b border-[--border-color]">$1</h1>');
+    
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="text-[--text-primary]">$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/`(.+?)`/g, '<code class="bg-[--bg-secondary] px-1 rounded text-[--accent-cyan]">$1</code>');
+    
+    html = html.replace(/^- (.+)$/gm, '<li class="ml-4 text-[--text-secondary]">$1</li>');
+    html = html.replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 text-[--text-secondary]">$2</li>');
+    
+    html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, function(match, lang, code) {
+        return '<pre class="bg-[--bg-secondary] p-3 rounded-lg my-2 overflow-auto text-xs"><code>' + code.trim() + '</code></pre>';
+    });
+    
+    html = html.replace(/\n\n/g, '</p><p class="my-2 text-[--text-secondary]">');
+    html = '<p class="my-2 text-[--text-secondary]">' + html + '</p>';
+    
+    return html;
+}
+
+function highlightJava(code, filename) {
+    if (!filename?.endsWith('.java')) return escapeHtml(code);
+    const lines = code.split('\n');
+    return lines.map((line, i) => {
+        let escaped = escapeHtml(line);
+        escaped = escaped.replace(/\b(public|private|protected|class|interface|enum|import|package|return|new|void|int|String|boolean|long|List|Set|Map|Optional)\b/g, '<span style="color:#c084fc">$1</span>');
+        escaped = escaped.replace(/\b(@\w+)\b/g, '<span style="color:#fbbf24">$1</span>');
+        escaped = escaped.replace(/(\/\/.*$)/g, '<span style="color:#64748b">$1</span>');
+        escaped = escaped.replace(/(".+?")/g, '<span style="color:#34d399">$1</span>');
+        return `<div class="code-line flex"><span class="inline-block w-8 text-right mr-3 text-[--text-muted] select-none">${i+1}</span><span>${escaped || '&nbsp;'}</span></div>`;
+    }).join('');
+}
+
+let designComplete = false;
+
+async function startDesignOnly(skipClarification, skipPromptPreview, forcedRequirement, analysisPromptOverride) {
+    if (agentRunning) return;
+    
+    const structuredRequirement = forcedRequirement || buildStructuredRequirement();
+    if (!structuredRequirement) {
+        addLog('错误', '启动前请先填写业务目标。', 'error');
+        return;
+    }
+    const taskLlm = buildTaskLlmConfig();
+    if (!taskLlm) {
+        addLog('错误', '请先在设置中配置当前会话 LLM API Key。', 'error');
+        openSettings();
+        return;
+    }
+    if (!skipClarification) {
+        syncRequirementInput(structuredRequirement);
+        openClarificationDialog(structuredRequirement, 'design');
+        return;
+    }
+    const finalRequirement = forcedRequirement || document.getElementById('requirementInput').value.trim() || structuredRequirement;
+    if (!skipPromptPreview) {
+        openPromptPreviewDialog('design', finalRequirement);
+        return;
+    }
+
+    agentRunning = true;
+    designComplete = false;
+    healingRounds = 0;
+    Object.keys(workspaceFiles).forEach(k => delete workspaceFiles[k]);
+    renderFileTree(workspaceFiles);
+    
+    const designBtn = document.getElementById('designBtn');
+    const implementBtn = document.getElementById('implementBtn');
+    designBtn.disabled = true;
+    designBtn.innerHTML = '<span class="pulse-dot inline-block w-2 h-2 rounded-full bg-blue-500 mr-2"></span>生成设计中...';
+    designBtn.classList.add('opacity-70', 'cursor-not-allowed');
+    if (implementBtn) implementBtn.disabled = true;
+    const approvalBar = document.getElementById('approvalBar');
+    if (approvalBar) approvalBar.classList.add('hidden');
+    document.getElementById('statRetries').textContent = '0/3';
+
+    startTime = Date.now();
+    timerInterval = setInterval(() => {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        document.getElementById('statDuration').textContent = elapsed;
+    }, 1000);
+    
+    startHeartbeatMonitor();
+
+    const workspace = buildTaskWorkspaceConfig();
+    const requestBody = {
+        requirement: finalRequirement,
+        llm: taskLlm,
+        workspace
+    };
+
+    addLog('系统', '正在提交设计任务...', 'system');
+
+    try {
+        const response = await fetch(API_BASE + '/api/v1/tasks/design-only', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+        }
+
+        const result = await response.json();
+        currentTaskId = result.taskId;
+        document.getElementById('currentTaskId').textContent = currentTaskId;
+        
+        addLog('系统', '设计任务已提交: ' + currentTaskId, 'success');
+        addLog('系统', '状态: ' + result.status, 'info');
+        
+        activateState('INTENT_ANALYSIS');
+        
+        connectWebSocketForTask(currentTaskId);
+
+    } catch (error) {
+        addLog('错误', '提交设计任务失败: ' + error.message, 'error');
+        stopAgent();
+    }
+}
+
+async function startFullPipeline(skipClarification, skipPromptPreview, forcedRequirement, analysisPromptOverride) {
+    addLog('系统', '当前版本只支持设计模式，已自动切换到设计任务。', 'warn');
+    return startDesignOnly(skipClarification, skipPromptPreview, forcedRequirement, analysisPromptOverride);
+}
+
+async function approveAndContinue() {
+    addLog('系统', '当前 LangGraph 流程无需手动审批。', 'info');
+    const approvalBar = document.getElementById('approvalBar');
+    if (approvalBar) approvalBar.classList.add('hidden');
+}
+
+function stopAgent() {
+    agentRunning = false;
+    clearInterval(timerInterval);
+    stopHeartbeatMonitor();
+    
+    if (startTime) {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        document.getElementById('statDuration').textContent = `${elapsed}s`;
+    }
+    
+    const designBtn = document.getElementById('designBtn');
+    const implementBtn = document.getElementById('implementBtn');
+    
+    designBtn.disabled = false;
+    designBtn.innerHTML = '<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>生成设计套件';
+    designBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+
+    if (implementBtn) {
+        implementBtn.disabled = false;
+        implementBtn.innerHTML = '<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>再次生成';
+        implementBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+    }
+}
+
+function toggleLeftSidebar(forceCollapse) {
+    const shell = document.getElementById('appShell');
+    const btn = document.getElementById('leftSidebarToggle');
+    if (!shell || !btn) return;
+    const shouldCollapse = forceCollapse == null ? !shell.classList.contains('left-collapsed') : Boolean(forceCollapse);
+    shell.classList.toggle('left-collapsed', shouldCollapse);
+    btn.title = shouldCollapse ? '展开控制台' : '折叠控制台';
+    sessionStorage.setItem('jap.ui.leftSidebarCollapsed', shouldCollapse ? '1' : '0');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('businessGoalInput').value = '实现一个用户管理 RESTful API，支持 CRUD 和分页查询，使用 MySQL 存储。';
+    syncRequirementInput(buildStructuredRequirement());
+    document.getElementById('clarificationInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendClarificationMessage();
+        }
+    });
+    document.getElementById('analysisUserPromptEditor').addEventListener('input', updatePromptPreviewCombined);
+
+    const collapsed = sessionStorage.getItem('jap.ui.leftSidebarCollapsed') === '1';
+    toggleLeftSidebar(collapsed);
+    switchConsoleTab('logs');
+    normalizeStateMachineLayout();
+    
+    connectWebSocket(null);
+    loadSettings();
+});
+
+// Settings Panel
+function openSettings() {
+    document.getElementById('settingsPanel').classList.remove('hidden');
+}
+
+function closeSettings() {
+    document.getElementById('settingsPanel').classList.add('hidden');
+}
+
+async function loadSettings() {
+    try {
+        const response = await fetch(API_BASE + '/api/v1/config');
+        if (response.ok) {
+            const data = await response.json();
+            const defaultBaseUrl = data?.llm?.baseUrl || 'https://api.deepseek.com';
+            const defaultModelName = data?.llm?.modelName || 'deepseek-chat';
+            const defaultWorkspacePath = data?.workspace?.path || 'output';
+
+            document.getElementById('llmBaseUrl').value = defaultBaseUrl;
+            document.getElementById('llmModelName').value = defaultModelName;
+            document.getElementById('workspacePath').value = defaultWorkspacePath;
+
+            const sessionLlm = getSessionLlmConfig();
+            if (sessionLlm) {
+                document.getElementById('llmBaseUrl').value = sessionLlm.baseUrl || defaultBaseUrl;
+                document.getElementById('llmModelName').value = sessionLlm.modelName || defaultModelName;
+                document.getElementById('llmApiKey').value = sessionLlm.apiKey || '';
+            }
+
+            const workspaceConfig = getWorkspacePathConfig();
+            if (workspaceConfig?.path) {
+                document.getElementById('workspacePath').value = workspaceConfig.path;
+            }
+
+            updateLlmStatus(Boolean(sessionLlm && sessionLlm.apiKey));
+            validateWorkspace();
+        }
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+    }
+}
+
+function updateLlmStatus(apiKeyConfigured) {
+    const statusEl = document.getElementById('llmStatus');
+    if (apiKeyConfigured) {
+        statusEl.textContent = 'LLM: configured';
+        statusEl.className = 'text-xs px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-200';
+    } else {
+        statusEl.textContent = 'LLM: not configured';
+        statusEl.className = 'text-xs px-3 py-1 rounded-full llm-alert';
+    }
+}
+
+function buildTaskLlmConfig() {
+    const baseUrl = (document.getElementById('llmBaseUrl')?.value || '').trim();
+    const apiKey = (document.getElementById('llmApiKey')?.value || '').trim();
+    const modelName = (document.getElementById('llmModelName')?.value || '').trim();
+    const sessionLlm = getSessionLlmConfig();
+    const resolved = {
+        baseUrl: baseUrl || null,
+        apiKey: apiKey || (sessionLlm ? sessionLlm.apiKey : null),
+        modelName: modelName || null,
+        temperature: 0.3,
+        maxTokens: 4096,
+        timeoutSeconds: 300
+    };
+    if (!resolved.apiKey) return null;
+    setSessionLlmConfig(resolved);
+    return resolved;
+}
+
+function buildTaskWorkspaceConfig() {
+    const workspaceInput = (document.getElementById('workspacePath')?.value || '').trim();
+    if (workspaceInput) {
+        setWorkspacePathConfig(workspaceInput);
+        return { path: workspaceInput };
+    }
+    const stored = getWorkspacePathConfig();
+    return stored && stored.path ? { path: stored.path } : {};
+}
+
+async function saveSettings() {
+    const sessionLlm = buildTaskLlmConfig();
+    if (!sessionLlm) {
+        alert('Please provide an LLM API key for this browser session.');
+        return;
+    }
+    const workspacePath = (document.getElementById('workspacePath')?.value || '').trim();
+    setWorkspacePathConfig(workspacePath);
+    setSessionLlmConfig(sessionLlm);
+    updateLlmStatus(true);
+    validateWorkspace();
+    alert('Saved. LLM config is session-scoped and workspace path is shared across tabs.');
+    closeSettings();
+}
+
+async function testLlmConnection() {
+    const testBtn = document.getElementById('testLlmBtn');
+    testBtn.disabled = true;
+    testBtn.textContent = 'Testing...';
+
+    const config = {
+        baseUrl: document.getElementById('llmBaseUrl').value,
+        apiKey: document.getElementById('llmApiKey').value,
+        modelName: document.getElementById('llmModelName').value,
+        temperature: 0.3,
+        maxTokens: 100,
+        timeoutSeconds: 30
+    };
+
+    try {
+        const response = await fetch(API_BASE + '/api/v1/config/llm/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            testBtn.textContent = 'Connected';
+            testBtn.className = 'px-3 py-1.5 rounded-lg text-xs font-medium bg-green-100 text-green-700 border border-green-200';
+        } else {
+            testBtn.textContent = 'Connection failed';
+            testBtn.className = 'px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-100 text-rose-700 border border-rose-200';
+        }
+    } catch (error) {
+        testBtn.textContent = 'Connection failed';
+        testBtn.className = 'px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-100 text-rose-700 border border-rose-200';
+    }
+
+    setTimeout(() => {
+        testBtn.disabled = false;
+        testBtn.textContent = 'Test Connection';
+        testBtn.className = 'px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-100 hover:bg-blue-200 text-blue-700 border border-blue-200 transition-colors';
+    }, 3000);
+}
+
+async function validateWorkspace() {
+    const path = document.getElementById('workspacePath').value;
+    const statusEl = document.getElementById('workspaceStatus');
+
+    if (!path) {
+        statusEl.textContent = 'Please enter workspace path';
+        statusEl.className = 'text-xs text-slate-500 mt-1';
+        setWorkspacePathConfig('');
+        return;
+    }
+
+    setWorkspacePathConfig(path);
+    statusEl.textContent = 'Output path: ' + path;
+    statusEl.className = 'text-xs text-green-400 mt-1';
+}
+
+function addBuildOutput(line, isError) {
+    const container = document.getElementById('buildTerminal');
+    if (container.querySelector('.text-slate-500')) {
+        container.innerHTML = '';
+    }
+
+    const entry = document.createElement('div');
+    entry.className = 'log-entry text-xs font-mono';
+    entry.style.color = isError ? '#ef4444' : '#94a3b8';
+    entry.textContent = line;
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearBuildTerminal() {
+    document.getElementById('buildTerminal').innerHTML = '<span class="text-slate-500">绛夊緟鏋勫缓...</span>';
+}
+
+let workspaceDirectoryHandle = null;
+
+async function selectWorkspaceFolder() {
+    alert('Please enter an absolute server path manually in the workspace field.');
+}
+
+async function saveFileToDirectory(filePath, content) {
+    if (!workspaceDirectoryHandle) {
+        console.warn('鏈€夋嫨鐩綍锛屾棤娉曚繚瀛樻枃浠?', filePath);
+        return false;
+    }
+    
+    try {
+        const pathParts = filePath.split('/');
+        let currentDir = workspaceDirectoryHandle;
+        
+        for (let i = 0; i < pathParts.length - 1; i++) {
+            const part = pathParts[i];
+            try {
+                currentDir = await currentDir.getDirectoryHandle(part, { create: true });
+            } catch {
+                currentDir = await currentDir.getDirectoryHandle(part, { create: true });
+            }
+        }
+        
+        const fileName = pathParts[pathParts.length - 1];
+        const fileHandle = await currentDir.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        
+        return true;
+    } catch (err) {
+        console.error('淇濆瓨鏂囦欢澶辫触:', filePath, err);
+        return false;
+    }
+}
+
+function onFolderSelected(event) {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+        const firstFile = files[0];
+        const relativePath = firstFile.webkitRelativePath || firstFile.name;
+        
+        if (relativePath) {
+            const pathParts = relativePath.split('/');
+            const selectedFolder = pathParts[0];
+            
+            const statusEl = document.getElementById('workspaceStatus');
+            statusEl.textContent = '宸查€夋嫨鏂囦欢澶? ' + selectedFolder;
+            statusEl.className = 'text-xs text-green-400 mt-1';
+            
+            const pathInput = document.getElementById('workspacePath');
+            const currentValue = pathInput.value;
+            
+            if (currentValue && currentValue.includes('/')) {
+                const lastSlash = currentValue.lastIndexOf('/');
+                const basePath = currentValue.substring(0, lastSlash);
+                pathInput.value = basePath + '/' + selectedFolder;
+            } else if (currentValue && currentValue.includes('\\')) {
+                const lastSlash = currentValue.lastIndexOf('\\');
+                const basePath = currentValue.substring(0, lastSlash);
+                pathInput.value = basePath + '\\' + selectedFolder;
+            } else {
+                pathInput.value = selectedFolder;
+            }
+            
+            validateWorkspace();
+        }
+    }
+    
+    event.target.value = '';
+}
+</script>
+
+<!-- Settings Panel -->
+<div id="settingsPanel" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-black/60" onclick="closeSettings()"></div>
+    <div class="absolute right-0 top-0 bottom-0 w-96 glass-panel border-l border-[--border-color] p-6 overflow-y-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h3 class="text-lg font-semibold text-slate-700">绯荤粺璁剧疆</h3>
+            <button onclick="closeSettings()" class="p-1 rounded hover:bg-slate-100">
+                <svg class="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="space-y-6">
+            <div>
+                <h4 class="text-sm font-medium text-slate-700 mb-3">LLM 閰嶇疆</h4>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">Base URL</label>
+                        <input type="text" id="llmBaseUrl" 
+                            class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-blue-300"
+                            placeholder="https://api.deepseek.com">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">API Key</label>
+                        <input type="password" id="llmApiKey" 
+                            class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-blue-300"
+                            placeholder="sk-xxxx...">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">Model Name</label>
+                        <input type="text" id="llmModelName" 
+                            class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-blue-300"
+                            placeholder="deepseek-chat">
+                    </div>
+                    <button id="testLlmBtn" onclick="testLlmConnection()"
+                        class="w-full px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-100 hover:bg-blue-200 text-blue-700 border border-blue-200 transition-colors">
+                        娴嬭瘯杩炴帴
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <h4 class="text-sm font-medium text-slate-700 mb-3">宸ヤ綔鍖鸿矾寰?/h4>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">鐢熸垚鐩綍锛堟敮鎸佺粷瀵硅矾寰勶級</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="workspacePath" 
+                            class="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-blue-300"
+                            placeholder="D:/MyProjects/generated-workspace"
+                            onchange="validateWorkspace()">
+                        <button type="button" onclick="selectWorkspaceFolder()" 
+                            class="px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors flex items-center gap-1"
+                            title="閫夋嫨鐩綍">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                            </svg>
+                            <span>閫夋嫨</span>
+                        </button>
+                    </div>
+                    <p id="workspaceStatus" class="text-xs text-slate-500 mt-1">杈撳叆缁濆璺緞锛屾垨鐐瑰嚮"閫夋嫨"鎸夐挳閫夋嫨鐩綍</p>
+                </div>
+            </div>
+
+            <button onclick="saveSettings()"
+                class="w-full py-2 rounded-lg font-medium text-sm bg-green-100 hover:bg-green-200 text-green-700 border border-green-200 transition-colors">
+                淇濆瓨璁剧疆
+            </button>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
+
+
+
+
+
+
