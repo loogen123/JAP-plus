@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -15,17 +15,17 @@
     .chip.green { color:#2d9e5d; border-color:#cce8d6; background:#f4fff8; }
     .chip.red { color:#d85555; border-color:#f1c3c3; background:#fff7f7; }
     .gear { width:36px; height:36px; border-radius:10px; border:1px solid var(--line2); background:#fff; color:#60708e; cursor:pointer; }
-    .layout { padding:16px; display:grid; grid-template-columns:340px minmax(760px,1fr) 360px; gap:14px; min-height:calc(100vh - 72px); }
+    .layout { padding:16px; display:grid; grid-template-columns:360px minmax(760px,1fr) 360px; gap:14px; min-height:calc(100vh - 72px); }
     .panel { background:#fff; border:1px solid var(--line); border-radius:14px; overflow:hidden; min-height:0; }
     .hd { padding:16px; border-bottom:1px solid var(--line); }
-    .title { margin:0; font-size:30px; font-weight:700; line-height:1.2; }
-    .sub { margin:4px 0 0; color:var(--muted); font-size:15px; }
+    .title { margin:0; font-size:28px; font-weight:700; line-height:1.2; }
+    .sub { margin:4px 0 0; color:var(--muted); font-size:14px; }
     .bd { padding:14px 16px; }
     .scroll { overflow:auto; max-height:calc(100vh - 120px); }
     .label { font-size:15px; font-weight:600; margin:8px 0 6px; }
     .field { width:100%; border:1px solid var(--line2); border-radius:10px; padding:10px 12px; font-size:14px; color:var(--text); outline:none; }
     .field:focus { border-color:#7fb2ff; box-shadow:0 0 0 3px #e8f1ff; }
-    textarea.field { min-height:96px; resize:vertical; }
+    textarea.field { min-height:120px; resize:vertical; }
     .btn { border:1px solid transparent; border-radius:10px; padding:9px 12px; font-size:14px; font-weight:600; cursor:pointer; }
     .btn-primary { background:linear-gradient(180deg,#5fa2ff,#4b8ff2); color:#fff; }
     .btn-light { background:#fff; border-color:var(--line2); color:#4f5f7d; }
@@ -43,17 +43,14 @@
     .tree,.preview { border:1px solid var(--line); border-radius:10px; background:#fcfdff; padding:10px; font-size:13px; color:#73809b; overflow:auto; }
     .tree { min-height:120px; max-height:170px; }
     .preview { min-height:180px; white-space:pre-wrap; }
-    .question-card { border:1px solid var(--line2); border-radius:10px; padding:10px; background:#fbfdff; margin-top:8px; }
-    .q-title { font-size:14px; font-weight:600; margin-bottom:6px; }
-    .q-dim { font-size:12px; color:#5f7aa5; margin-bottom:8px; }
-    .q-option { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; font-size:13px; color:#42506a; }
     .modal { position:fixed; inset:0; background:rgba(11,22,47,.35); display:none; align-items:center; justify-content:center; z-index:50; padding:16px; }
     .modal.show { display:flex; }
     .modal-card { width:min(760px,100%); background:#fff; border:1px solid var(--line); border-radius:14px; overflow:hidden; }
     .modal-hd { padding:14px 16px; border-bottom:1px solid var(--line); font-size:20px; font-weight:700; }
     .modal-bd { padding:14px 16px; display:grid; gap:10px; }
     .modal-ft { padding:10px 16px; border-top:1px solid var(--line); display:flex; justify-content:flex-end; gap:10px; }
-    @media (max-width:1360px){ .layout{grid-template-columns:340px 1fr;} .right{grid-column:span 2;} }
+    .q-option { display:flex; align-items:flex-start; gap:8px; margin:8px 0; font-size:14px; }
+    @media (max-width:1360px){ .layout{grid-template-columns:360px 1fr;} .right{grid-column:span 2;} }
     @media (max-width:980px){ .layout{grid-template-columns:1fr;} .right{grid-column:span 1;} .workspace,.log,.scroll{min-height:0;max-height:none;height:auto;} }
   </style>
 </head>
@@ -65,17 +62,12 @@
 
   <section class="layout">
     <aside class="panel">
-      <div class="hd"><h2 class="title">需求控制台</h2><p class="sub">输入业务目标，先做 AI 选择题澄清，再启动生成</p></div>
+      <div class="hd"><h2 class="title">需求控制台</h2><p class="sub">只输入业务目标，系统自动澄清后进入设计流程</p></div>
       <div class="bd scroll">
         <div class="label">业务目标 *</div>
         <textarea id="businessGoalInput" class="field" placeholder="例如：实现多租户 SaaS 扫码点餐系统，支持门店、订单、支付、权限隔离。"></textarea>
-        <div class="mt-2 flex gap-2">
-          <button class="btn btn-light" onclick="generateQuestionnaire()">1. 生成澄清问卷</button>
-          <button class="btn btn-primary" id="designBtn" onclick="startDesignOnly()">2. 生成设计套件</button>
-        </div>
+        <div class="mt-2 flex gap-2"><button class="btn btn-light" onclick="generateQuestionnaire()">1. AI 澄清</button><button class="btn btn-primary" id="designBtn" onclick="startDesignOnly()">2. 生成设计套件</button></div>
 
-        <div class="label mt-3">AI 澄清问卷（单选）</div>
-        <div id="questionnaireContainer" class="text-[13px] text-[#6f7c95]">尚未生成问卷。</div>
       </div>
     </aside>
 
@@ -118,37 +110,77 @@
     </aside>
   </section>
 
-  <div id="settingsModal" class="modal">
-    <div class="modal-card">
-      <div class="modal-hd">系统设置</div>
-      <div class="modal-bd">
-        <div class="label" style="font-size:14px;margin:0;">LLM Base URL</div><input id="llmBaseUrl" class="field" placeholder="https://api.deepseek.com" />
-        <div class="label" style="font-size:14px;margin:0;">LLM Model Name</div><input id="llmModelName" class="field" placeholder="deepseek-chat" />
-        <div class="label" style="font-size:14px;margin:0;">LLM API Key（当前 Tab 独立）</div><input id="llmApiKey" type="password" class="field" placeholder="请输入 API Key" />
-        <div class="label" style="font-size:14px;margin:0;">Workspace Path（全局共享）</div>
-        <div class="flex gap-2"><input id="workspacePath" class="field" placeholder="D:/GitProgram/JAP plus/output" onchange="validateWorkspace()" /><button class="btn btn-light" onclick="chooseWorkspaceFolder()">选择目录</button></div>
-      </div>
-      <div class="modal-ft"><button class="btn btn-light" onclick="closeSettings()">取消</button><button class="btn btn-light" onclick="testLlmConnection()">测试连接</button><button class="btn btn-primary" onclick="saveSettings()">保存设置</button></div>
-    </div>
-  </div>
+  <div id="settingsModal" class="modal"><div class="modal-card"><div class="modal-hd">系统设置</div><div class="modal-bd"><div class="label" style="font-size:14px;margin:0;">LLM Base URL</div><input id="llmBaseUrl" class="field" placeholder="https://api.deepseek.com" /><div class="label" style="font-size:14px;margin:0;">LLM Model Name</div><input id="llmModelName" class="field" placeholder="deepseek-chat" /><div class="label" style="font-size:14px;margin:0;">LLM API Key（当前 Tab 独立）</div><input id="llmApiKey" type="password" class="field" placeholder="请输入 API Key" /><div id="testConnResult" style="font-size:13px; margin-top: 4px; display: none;"></div><div class="label" style="font-size:14px;margin:0;">澄清模式</div><select id="elicitationMode" class="field"><option value="quick">快速模式（默认）</option><option value="deep">深度模式（更慢）</option></select><div class="label" style="font-size:14px;margin:0;">Workspace Path（全局共享）</div><div class="flex gap-2"><input id="workspacePath" class="field" placeholder="D:/GitProgram/JAP plus/output" onchange="validateWorkspace()" /><button class="btn btn-light" onclick="chooseWorkspaceFolder()">选择目录</button></div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeSettings()">取消</button><button class="btn btn-light" onclick="testLlmConnection()">测试连接</button><button class="btn btn-primary" onclick="saveSettings()">保存设置</button></div></div></div>
+
+  <div id="questionnaireModal" class="modal"><div class="modal-card"><div class="modal-hd">需求澄清问卷</div><div class="modal-bd"><div id="questionProgress" style="font-size:13px;color:var(--muted);"></div><div id="questionTitle" style="font-size:16px;font-weight:600;"></div><div id="questionDimension" style="font-size:13px;color:#4f719f;"></div><div id="questionType" style="font-size:12px;color:#5a7aa7;"></div><div id="questionOptions"></div></div><div class="modal-ft"><button class="btn btn-light" id="prevQuestionBtn" onclick="prevQuestion()">上一题</button><button class="btn btn-light" id="nextQuestionBtn" onclick="nextQuestion()">下一题</button><button class="btn btn-primary" id="finishQuestionBtn" onclick="finishQuestionnaire()">完成问卷</button></div></div></div>
+  <div id="finalizeModal" class="modal"><div class="modal-card"><div class="modal-hd">需求定稿确认</div><div class="modal-bd"><div style="font-size:13px;color:var(--muted);">系统已基于当前问卷与答案自动生成定稿。你可以直接修改后确认。</div><textarea id="finalRequirementEditor" class="field" style="min-height:280px;"></textarea></div><div class="modal-ft"><button class="btn btn-light" onclick="regenerateFinalRequirement()">重新生成</button><button class="btn btn-light" onclick="closeFinalizeModal()">取消</button><button class="btn btn-primary" onclick="confirmFinalRequirement()">确认并继续</button></div></div></div>
   <script>
     const API_BASE = "";
     const SESSION_LLM_CONFIG_KEY = "jap.llm.session.config";
     const LOCAL_WORKSPACE_PATH_KEY = "jap.workspace.path";
+    const SESSION_ELICITATION_MODE_KEY = "jap.elicitation.mode";
     const STATE_ORDER = ["IDLE","INTENT_ANALYSIS","MODELING","REVIEW","DETAILING","PRESENTATION","COMPLETED","FAILED"];
     let ws = null;
     let wsReconnectTimer = null;
     let currentTaskId = null;
-    let latestQuestionnaire = null;
+    let clarificationPlan = null;
+    let clarificationRounds = [];
+    let activeQuestionnaire = [];
+    let questionIndex = 0;
+    const answers = {};
+    let finalizedRequirement = "";
+    let questionnaireLoading = false;
+    let questionnaireFullyLoaded = false;
+    let finalizeInProgress = false;
+    let progressiveAppendTimer = null;
+    let backgroundElicitationStop = false;
+    let finalizeDebounceTimer = null;
+    let backgroundFinalizeRunning = false;
+    let backgroundFinalizePending = false;
+    let backgroundFinalizeSeq = 0;
+    let lastFinalizedFingerprint = "";
+    let lastFinalizedAt = 0;
+    let finalizeModalOpen = false;
 
-    function openSettings(){ document.getElementById("settingsModal").classList.add("show"); }
+    function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
+    function normalizeAnswersForApi(){
+      const out = {};
+      Object.entries(answers).forEach(([k,v])=>{
+        if(Array.isArray(v)) out[k] = v;
+        else out[k] = String(v ?? "");
+      });
+      return out;
+    }
+    function buildAnswersFingerprint(){
+      const normalized = normalizeAnswersForApi();
+      const keys = Object.keys(normalized).sort();
+      const parts = keys.map((k)=>{
+        const v = normalized[k];
+        if(Array.isArray(v)) return `${k}:${[...v].sort().join("|")}`;
+        return `${k}:${String(v)}`;
+      });
+      return parts.join(";");
+    }
+    function getFlattenQuestionnaire(){
+      const list = [];
+      clarificationRounds.forEach((r)=>{ (r.questions||[]).forEach((q)=>list.push(q)); });
+      return list;
+    }
+
+    function openSettings(){ 
+      document.getElementById("testConnResult").style.display = "none";
+      document.getElementById("elicitationMode").value = getElicitationMode();
+      document.getElementById("settingsModal").classList.add("show"); 
+    }
     function closeSettings(){ document.getElementById("settingsModal").classList.remove("show"); }
     function clearConsole(){ document.getElementById("logContainer").innerHTML = ""; }
 
-    function getSessionLlmConfig(){ try { const raw = sessionStorage.getItem(SESSION_LLM_CONFIG_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; } }
+    function getSessionLlmConfig(){ try { const raw=sessionStorage.getItem(SESSION_LLM_CONFIG_KEY); return raw?JSON.parse(raw):null; } catch { return null; } }
     function setSessionLlmConfig(config){ if(config?.apiKey){ sessionStorage.setItem(SESSION_LLM_CONFIG_KEY, JSON.stringify(config)); } }
-    function getWorkspacePathConfig(){ const p = localStorage.getItem(LOCAL_WORKSPACE_PATH_KEY); return p ? { path:p } : null; }
-    function setWorkspacePathConfig(path){ if(!path){ localStorage.removeItem(LOCAL_WORKSPACE_PATH_KEY); return; } localStorage.setItem(LOCAL_WORKSPACE_PATH_KEY, path); }
+    function getElicitationMode(){ const mode=sessionStorage.getItem(SESSION_ELICITATION_MODE_KEY); return mode==="deep"?"deep":"quick"; }
+    function setElicitationMode(mode){ sessionStorage.setItem(SESSION_ELICITATION_MODE_KEY, mode==="deep"?"deep":"quick"); }
+    function getWorkspacePathConfig(){ const p=localStorage.getItem(LOCAL_WORKSPACE_PATH_KEY); return p?{path:p}:null; }
+    function setWorkspacePathConfig(path){ if(!path){ localStorage.removeItem(LOCAL_WORKSPACE_PATH_KEY); return; } localStorage.setItem(LOCAL_WORKSPACE_PATH_KEY,path); }
 
     function updateLlmChip(ok){ const el=document.getElementById("llmChip"); el.className="chip "+(ok?"green":"red"); el.textContent=ok?"LLM: configured":"LLM: not configured"; }
     function updateWsChip(status){ const el=document.getElementById("wsChip"); el.className="chip "+(status==="connected"?"green":status==="disconnected"?"red":""); el.textContent="WebSocket: "+status; }
@@ -168,94 +200,121 @@
         handleEvent(payload);
       };
       ws.onerror = () => updateWsChip("disconnected");
-      ws.onclose = () => { updateWsChip("disconnected"); ws=null; wsReconnectTimer=setTimeout(()=>connectWebSocket(currentTaskId), 3000); };
+      ws.onclose = () => { updateWsChip("disconnected"); ws=null; wsReconnectTimer=setTimeout(()=>connectWebSocket(currentTaskId),3000); };
     }
     function connectWebSocketForTask(taskId){ currentTaskId=taskId||null; connectWebSocket(currentTaskId); }
 
     function esc(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll("\"","&quot;").replaceAll("'","&#39;"); }
-    function addLog(tag, msg, level="info"){
-      const root=document.getElementById("logContainer");
-      const color = level==="success" ? "#2c9a58" : level==="error" ? "#d35a68" : "#5673a0";
-      const line=document.createElement("div");
-      line.className="log-line";
-      line.innerHTML=`<span style="color:#7f8ca5;margin-right:8px;">[${new Date().toLocaleTimeString()}]</span><span style="color:${color};font-weight:700;">${esc(tag)}</span> ${esc(msg)}`;
-      root.appendChild(line); root.scrollTop=root.scrollHeight;
-    }
+    function addLog(tag,msg,level="info"){ const root=document.getElementById("logContainer"); const color=level==="success"?"#2c9a58":level==="error"?"#d35a68":"#5673a0"; const line=document.createElement("div"); line.className="log-line"; line.innerHTML=`<span style="color:#7f8ca5;margin-right:8px;">[${new Date().toLocaleTimeString()}]</span><span style="color:${color};font-weight:700;">${esc(tag)}</span> ${esc(msg)}`; root.appendChild(line); root.scrollTop=root.scrollHeight; }
 
-    function updateWorkspaceProgress(stage){
-      const idx=Math.max(0, STATE_ORDER.indexOf(stage));
-      const pct=Math.round((idx/(STATE_ORDER.length-2))*100);
-      const v=stage==="FAILED" ? 100 : Math.min(100, Math.max(0, pct));
-      document.getElementById("workspaceProgressBar").style.width=`${v}%`;
-      document.getElementById("workspaceProgressText").textContent=`${v}%`;
-      document.getElementById("workspaceStage").textContent=stage;
-    }
+    function updateWorkspaceProgress(stage){ const idx=Math.max(0,STATE_ORDER.indexOf(stage)); const pct=Math.round((idx/(STATE_ORDER.length-2))*100); const v=stage==="FAILED"?100:Math.min(100,Math.max(0,pct)); document.getElementById("workspaceProgressBar").style.width=`${v}%`; document.getElementById("workspaceProgressText").textContent=`${v}%`; document.getElementById("workspaceStage").textContent=stage; }
 
     function activateState(stateName){
-      const target=STATE_ORDER.includes(stateName)?stateName:"IDLE";
-      const idx=STATE_ORDER.indexOf(target);
-      document.querySelectorAll(".state-node").forEach((node)=>{
-        const s=node.dataset.state; const rect=node.querySelector("rect"); if(!s||!rect) return;
-        const sIdx=STATE_ORDER.indexOf(s); const active=s===target; const done=sIdx>-1&&sIdx<idx&&s!=="FAILED";
-        if(target==="FAILED"&&s==="FAILED"){ rect.setAttribute("fill","#ffecef"); rect.setAttribute("stroke","#ef9ca8"); rect.setAttribute("stroke-width","2"); }
-        else if(active){ rect.setAttribute("fill","#ebf3ff"); rect.setAttribute("stroke","#6aa6ff"); rect.setAttribute("stroke-width","2"); }
-        else if(done){ rect.setAttribute("fill","#ecfbf1"); rect.setAttribute("stroke","#79c79a"); rect.setAttribute("stroke-width","1.5"); }
-        else { rect.setAttribute("fill","#fff"); rect.setAttribute("stroke","#d7e2f3"); rect.setAttribute("stroke-width","1.2"); }
-      });
-      document.querySelectorAll(".state-arrow").forEach((arrow)=>{
-        const from=arrow.dataset.from, to=arrow.dataset.to;
-        const f=STATE_ORDER.indexOf(from), t=STATE_ORDER.indexOf(to);
-        const activePath=f>-1&&t>-1&&t<=idx&&target!=="FAILED";
-        const retryPath=target==="MODELING"&&from==="REVIEW"&&to==="MODELING";
-        arrow.setAttribute("stroke", activePath||retryPath ? "#6aa6ff" : "#9cb0cc");
-      });
+      const target=STATE_ORDER.includes(stateName)?stateName:"IDLE"; const idx=STATE_ORDER.indexOf(target);
+      document.querySelectorAll(".state-node").forEach((node)=>{ const s=node.dataset.state; const rect=node.querySelector("rect"); if(!s||!rect) return; const sIdx=STATE_ORDER.indexOf(s); const active=s===target; const done=sIdx>-1&&sIdx<idx&&s!=="FAILED"; if(target==="FAILED"&&s==="FAILED"){ rect.setAttribute("fill","#ffecef"); rect.setAttribute("stroke","#ef9ca8"); rect.setAttribute("stroke-width","2"); } else if(active){ rect.setAttribute("fill","#ebf3ff"); rect.setAttribute("stroke","#6aa6ff"); rect.setAttribute("stroke-width","2"); } else if(done){ rect.setAttribute("fill","#ecfbf1"); rect.setAttribute("stroke","#79c79a"); rect.setAttribute("stroke-width","1.5"); } else { rect.setAttribute("fill","#fff"); rect.setAttribute("stroke","#d7e2f3"); rect.setAttribute("stroke-width","1.2"); } });
+      document.querySelectorAll(".state-arrow").forEach((arrow)=>{ const from=arrow.dataset.from, to=arrow.dataset.to; const f=STATE_ORDER.indexOf(from), t=STATE_ORDER.indexOf(to); const activePath=f>-1&&t>-1&&t<=idx&&target!=="FAILED"; const retryPath=target==="MODELING"&&from==="REVIEW"&&to==="MODELING"; arrow.setAttribute("stroke", activePath||retryPath?"#6aa6ff":"#9cb0cc"); });
       updateWorkspaceProgress(target);
     }
 
-    function updateFileTree(files){
-      const tree=document.getElementById("fileTree"), preview=document.getElementById("filePreview"), count=document.getElementById("artifactCount");
-      if(!Array.isArray(files)||files.length===0){ tree.textContent="暂无生成文件"; preview.textContent="// 文件内容将在此显示..."; count.textContent="0 个"; document.getElementById("previewName").textContent="--"; return; }
-      count.textContent=`${files.length} 个`;
-      tree.innerHTML=files.map(f=>`<div style="padding:6px 4px;border-bottom:1px dashed #e8eef9;">${esc(f)}</div>`).join("");
-      document.getElementById("previewName").textContent=files[0];
-      preview.textContent=`// 已生成文件:\n${files.join("\n")}`;
+    function updateFileTree(files){ const tree=document.getElementById("fileTree"), preview=document.getElementById("filePreview"), count=document.getElementById("artifactCount"); if(!Array.isArray(files)||files.length===0){ tree.textContent="暂无生成文件"; preview.textContent="// 文件内容将在此显示..."; count.textContent="0 个"; document.getElementById("previewName").textContent="--"; return; } count.textContent=`${files.length} 个`; tree.innerHTML=files.map(f=>`<div style="padding:6px 4px;border-bottom:1px dashed #e8eef9;">${esc(f)}</div>`).join(""); document.getElementById("previewName").textContent=files[0]; preview.textContent=`// 已生成文件:\n${files.join("\n")}`; }
+
+    function handleEvent(event){ if(event.type==="STAGE_CHANGED"){ const from=event?.data?.from||"-", to=event?.data?.to||"IDLE"; activateState(to); addLog("状态",`${from} -> ${to}`); return; } if(event.type==="LOG_ADDED"){ const d=event.data||{}; const lv=d.logType==="ERROR"?"error":d.logType==="SUCCESS"?"success":"info"; addLog(d.logType||"INFO",`${d.title||""} ${d.summary||""}`.trim(),lv); return; } if(event.type==="TASK_FINISHED"){ const status=event?.data?.status==="COMPLETED"?"COMPLETED":"FAILED"; activateState(status); updateFileTree(Array.isArray(event?.data?.artifacts)?event.data.artifacts:[]); addLog("结果",status==="COMPLETED"?"任务完成":"任务失败",status==="COMPLETED"?"success":"error"); } }
+
+    function buildTaskLlmConfig(){ const baseUrl=(document.getElementById("llmBaseUrl").value||"").trim(); const apiKey=(document.getElementById("llmApiKey").value||"").trim(); const modelName=(document.getElementById("llmModelName").value||"").trim(); const cached=getSessionLlmConfig(); const cfg={ baseUrl:baseUrl||cached?.baseUrl||"https://api.deepseek.com", apiKey:apiKey||cached?.apiKey||"", modelName:modelName||cached?.modelName||"deepseek-chat" }; if(!cfg.apiKey) return null; setSessionLlmConfig(cfg); return cfg; }
+
+    function validateWorkspace(){ const p=(document.getElementById("workspacePath").value||"").trim(); if(!p){ document.getElementById("workspaceStatus").textContent="未设置"; document.getElementById("workspacePathLabel").textContent="output"; setWorkspacePathConfig(""); return; } document.getElementById("workspaceStatus").textContent=`当前目录：${p}`; document.getElementById("workspacePathLabel").textContent=p; setWorkspacePathConfig(p); }
+    function saveSettings(){ const llm=buildTaskLlmConfig(); if(!llm){ addLog("错误","保存失败：API Key 不能为空","error"); return; } const mode=(document.getElementById("elicitationMode").value||"quick").trim(); setElicitationMode(mode); updateLlmChip(true); validateWorkspace(); closeSettings(); addLog("系统",`设置已保存（澄清模式：${mode==="deep"?"深度":"快速"}）`,"success"); }
+
+    async function chooseWorkspaceFolder(){ try{ const resp=await fetch(API_BASE+"/api/v1/config/workspace/choose",{method:"POST"}); const data=await resp.json(); if(!resp.ok||!data?.path){ addLog("错误",data?.message||"未选择目录","error"); return; } document.getElementById("workspacePath").value=data.path; validateWorkspace(); addLog("系统",`已选择输出目录：${data.path}`,"success"); }catch(error){ addLog("错误",String(error?.message||error),"error"); } }
+    async function testLlmConnection(){ 
+      const llm=buildTaskLlmConfig(); 
+      const resultDiv = document.getElementById("testConnResult");
+      resultDiv.style.display = "block";
+      
+      if(!llm){ 
+        resultDiv.style.color = "var(--red)";
+        resultDiv.textContent = "❌ 请先输入 API Key";
+        addLog("错误","请先输入 API Key","error"); 
+        return; 
+      } 
+      
+      resultDiv.style.color = "var(--muted)";
+      resultDiv.textContent = "⏳ 正在测试连接中...";
+      
+      try{ 
+        const resp=await fetch(API_BASE+"/api/v1/config/llm/test",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({llm})
+        }); 
+        
+        if (resp.ok) {
+          resultDiv.style.color = "var(--green)";
+          resultDiv.textContent = "✅ LLM 连接测试成功";
+          addLog("系统", "LLM 连接测试成功", "success");
+        } else {
+          const errData = await resp.json().catch(()=>({}));
+          resultDiv.style.color = "var(--red)";
+          resultDiv.textContent = "❌ LLM 连接测试失败: " + (errData.message || resp.statusText || resp.status);
+          addLog("系统", "LLM 连接测试失败: " + (errData.message || resp.statusText || resp.status), "error");
+        }
+      } catch (e) { 
+        resultDiv.style.color = "var(--red)";
+        resultDiv.textContent = "❌ LLM 连接测试异常: " + (e.message || String(e));
+        addLog("错误", "LLM 连接测试异常: " + (e.message || String(e)), "error"); 
+      } 
     }
 
-    function handleEvent(event){
-      if(event.type==="STAGE_CHANGED"){ const from=event?.data?.from||"-", to=event?.data?.to||"IDLE"; activateState(to); addLog("状态", `${from} -> ${to}`); return; }
-      if(event.type==="LOG_ADDED"){ const d=event.data||{}; const lv=d.logType==="ERROR"?"error":d.logType==="SUCCESS"?"success":"info"; addLog(d.logType||"INFO", `${d.title||""} ${d.summary||""}`.trim(), lv); return; }
-      if(event.type==="TASK_FINISHED"){ const status=event?.data?.status==="COMPLETED"?"COMPLETED":"FAILED"; activateState(status); const files=Array.isArray(event?.data?.artifacts)?event.data.artifacts:[]; updateFileTree(files); addLog("结果", status==="COMPLETED"?"任务完成":"任务失败", status==="COMPLETED"?"success":"error"); }
+    function normalizeQuestionText(text){
+      return String(text||"")
+        .toLowerCase()
+        .replace(/[\s\r\n\t]+/g,"")
+        .replace(/[，。！？、,.!?;；:："'“”‘’（）()【】\[\]{}<>《》\-—_]/g,"");
     }
-
-    function buildTaskLlmConfig(){
-      const baseUrl=(document.getElementById("llmBaseUrl").value||"").trim();
-      const apiKey=(document.getElementById("llmApiKey").value||"").trim();
-      const modelName=(document.getElementById("llmModelName").value||"").trim();
-      const cached=getSessionLlmConfig();
-      const cfg={ baseUrl: baseUrl||cached?.baseUrl||"https://api.deepseek.com", apiKey: apiKey||cached?.apiKey||"", modelName: modelName||cached?.modelName||"deepseek-chat" };
-      if(!cfg.apiKey) return null;
-      setSessionLlmConfig(cfg);
-      return cfg;
+    function questionSignature(q){
+      const options = Array.isArray(q?.options) ? [...q.options].map(normalizeQuestionText).sort().join("|") : "";
+      const strict = `${q?.dimension||""}#${q?.questionType||""}#${normalizeQuestionText(q?.questionText||"")}#${options}`;
+      const loose = `${q?.dimension||""}#${q?.questionType||""}#${normalizeQuestionText(q?.questionText||"")}`;
+      return { strict, loose };
     }
-
-    function collectUserAnswers(){
-      const answers={};
-      if(!latestQuestionnaire?.questions) return answers;
-      latestQuestionnaire.questions.forEach((q)=>{
-        const checked=document.querySelector(`input[name="q_${q.id}"]:checked`);
-        if(checked) answers[q.id]=checked.value;
+    function mergeQuestions(newQuestions){
+      if(!Array.isArray(newQuestions) || newQuestions.length===0) return 0;
+      const exists = new Set();
+      (activeQuestionnaire||[]).forEach((q)=>{
+        const sig = questionSignature(q);
+        exists.add(sig.strict);
+        exists.add(sig.loose);
       });
-      return answers;
+      let added = 0;
+      newQuestions.forEach((q)=>{
+        const sig = questionSignature(q);
+        if(!sig.loose || exists.has(sig.strict) || exists.has(sig.loose)) return;
+        exists.add(sig.strict);
+        exists.add(sig.loose);
+        activeQuestionnaire.push(q);
+        added++;
+      });
+      if(clarificationRounds[0]) clarificationRounds[0].questions = activeQuestionnaire;
+      return added;
     }
 
-    function renderQuestionnaire(questionnaire){
-      const root=document.getElementById("questionnaireContainer");
-      const questions=questionnaire?.questions||[];
-      if(questions.length===0){ root.textContent="未生成问卷。"; return; }
-      root.innerHTML = questions.map((q)=>{
-        const opts=q.options.map((opt,idx)=>`<label class="q-option"><input type="radio" name="q_${q.id}" value="${esc(opt)}" ${idx===0?"checked":""}/> <span>${esc(opt)}</span></label>`).join("");
-        return `<div class="question-card"><div class="q-title">${esc(q.id)}. ${esc(q.questionText)}</div><div class="q-dim">维度：${esc(q.dimension)}</div>${opts}</div>`;
-      }).join("");
+    async function requestClarificationRound({requirement,llm,context,workspace,elicitationMode,batchSize,targetTotal,timeoutMs}){
+      let timer = null;
+      const controller = new AbortController();
+      try{
+        timer = setTimeout(() => controller.abort(), timeoutMs || 60000);
+        const resp=await fetch(API_BASE+"/api/v1/elicitation/questionnaire",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({requirement,llm,context,workspace,elicitationMode,batchSize,targetTotal}),
+          signal:controller.signal
+        });
+        const data=await resp.json();
+        if(!resp.ok) throw new Error(data?.message||"问卷生成失败");
+        return data;
+      }finally{
+        if(timer) clearTimeout(timer);
+      }
     }
 
     async function generateQuestionnaire(){
@@ -263,84 +322,410 @@
       if(!requirement){ addLog("错误","请先输入业务目标","error"); return; }
       const llm=buildTaskLlmConfig();
       if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
-      addLog("系统","正在生成澄清问卷...");
+      const elicitationMode = getElicitationMode();
+      clarificationPlan = null;
+      clarificationRounds = [];
+      activeQuestionnaire = [];
+      finalizedRequirement = requirement;
+      questionnaireFullyLoaded = false;
+      questionnaireLoading = true;
+      backgroundElicitationStop = false;
+      Object.keys(answers).forEach((k)=>delete answers[k]);
+      if(progressiveAppendTimer){ clearInterval(progressiveAppendTimer); progressiveAppendTimer = null; }
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const workspace=workspacePath ? { path:workspacePath } : (getWorkspacePathConfig()||{});
+      const targetTotal = 100;
+      const firstBatchSize = elicitationMode==="deep" ? 24 : 12;
+      const backgroundBatchSize = elicitationMode==="deep" ? 18 : 10;
+      const requestTimeoutMs = elicitationMode==="deep" ? 90000 : 45000;
+      openQuestionnaireModal();
+      addLog("系统",`AI 正在发起澄清（${elicitationMode==="deep"?"深度":"快速"}模式）...`);
       try{
-        const resp=await fetch(API_BASE+"/api/v1/elicitation/questionnaire",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ requirement, llm }) });
-        const data=await resp.json();
-        if(!resp.ok){ addLog("错误", data?.message||"问卷生成失败", "error"); return; }
-        latestQuestionnaire=data.questionnaire;
-        renderQuestionnaire(latestQuestionnaire);
-        addLog("系统",`问卷生成完成，共 ${latestQuestionnaire.questions.length} 题`,"success");
-      }catch(error){ addLog("错误", String(error?.message||error), "error"); }
+        const data = await requestClarificationRound({requirement,llm,context:{},workspace,elicitationMode,batchSize:firstBatchSize,targetTotal,timeoutMs:requestTimeoutMs});
+        clarificationPlan = data;
+        finalizedRequirement = data.refinedRequirement || finalizedRequirement;
+        if(data?.meta?.timingMs){
+          const t = data.meta.timingMs;
+          addLog("系统",`澄清耗时：总 ${t.total}ms，上下文 ${t.context}ms，深度思考 ${t.deepThinking}ms，结构化 ${t.structured}ms`);
+        }
+        if(data?.meta?.batch?.droppedAsDuplicate>0){
+          addLog("系统",`已自动去重 ${data.meta.batch.droppedAsDuplicate} 道重复问题`);
+        }
+        if(data?.fallback){ addLog("系统","问卷已切换到快速兜底模式，避免长时间阻塞。","success"); }
+        const returnedQuestions = data.questionnaire?.questions || [];
+        if(data.clarityReached || !Array.isArray(returnedQuestions) || returnedQuestions.length===0){
+          questionnaireLoading = false;
+          questionnaireFullyLoaded = true;
+          closeQuestionnaireModal();
+          addLog("系统","AI 判断需求已足够清晰，无需继续提问。","success");
+          return;
+        }
+        activeQuestionnaire = [];
+        clarificationRounds = [{ round: 1, questions: activeQuestionnaire }];
+        questionIndex=0;
+        questionnaireLoading = false;
+        mergeQuestions(clone(returnedQuestions));
+        renderCurrentQuestion();
+        addLog("系统",`首批题目已就绪：${activeQuestionnaire.length}/${targetTotal}`,"success");
+
+        const runBackgroundPrefetch = async ()=>{
+          let guard = 0;
+          while(!backgroundElicitationStop && activeQuestionnaire.length < targetTotal && guard < 12){
+            guard++;
+            addLog("系统",`后台补充题库中... 第 ${guard} 批（当前 ${activeQuestionnaire.length}/${targetTotal}）`);
+            try{
+              const nextData = await requestClarificationRound({
+                requirement,
+                llm,
+                workspace,
+                elicitationMode,
+                batchSize:backgroundBatchSize,
+                targetTotal,
+                timeoutMs:requestTimeoutMs,
+                context:{
+                  refinedRequirement: finalizedRequirement || requirement,
+                  previousRounds:[{ round: 1, questions: activeQuestionnaire }],
+                  answers: normalizeAnswersForApi()
+                }
+              });
+              finalizedRequirement = nextData?.refinedRequirement || finalizedRequirement;
+              const nextQuestions = nextData?.questionnaire?.questions || [];
+              const added = mergeQuestions(nextQuestions);
+              renderCurrentQuestion();
+              if(nextData?.meta?.timingMs){
+                const t = nextData.meta.timingMs;
+                addLog("系统",`后台批次耗时：总 ${t.total}ms（结构化 ${t.structured}ms）`);
+              }
+              if(nextData?.meta?.batch?.droppedAsDuplicate>0){
+                addLog("系统",`后台批次已去重 ${nextData.meta.batch.droppedAsDuplicate} 道问题`);
+              }
+              if(added===0 || nextData.clarityReached){
+                questionnaireFullyLoaded = true;
+                renderCurrentQuestion();
+                addLog("系统",`问卷补充完成，共 ${activeQuestionnaire.length} 题。`,"success");
+                return;
+              }
+            }catch(bgErr){
+              addLog("系统","后台补题已停止（超时或无新增），不影响当前作答。");
+              questionnaireFullyLoaded = true;
+              renderCurrentQuestion();
+              return;
+            }
+            await new Promise((r)=>setTimeout(r,150));
+          }
+          questionnaireFullyLoaded = true;
+          renderCurrentQuestion();
+          addLog("系统",`问卷补充结束，当前共 ${activeQuestionnaire.length} 题。`,"success");
+        };
+        void runBackgroundPrefetch();
+      }catch(error){
+        questionnaireLoading = false;
+        const message = String(error?.message||error);
+        closeQuestionnaireModal();
+        if(message.toLowerCase().includes("aborted")){
+          addLog("错误","问卷请求超时，请重试（已启用快速超时保护）","error");
+          return;
+        }
+        addLog("错误",message,"error");
+      }
+    }
+
+    function openQuestionnaireModal(){ document.getElementById("questionnaireModal").classList.add("show"); renderCurrentQuestion(); }
+    function closeQuestionnaireModal(){ backgroundElicitationStop = true; if(progressiveAppendTimer){ clearInterval(progressiveAppendTimer); progressiveAppendTimer = null; } document.getElementById("questionnaireModal").classList.remove("show"); }
+    function openFinalizeModal(content){
+      finalizeModalOpen = true;
+      document.getElementById("finalRequirementEditor").value = content || "";
+      document.getElementById("finalizeModal").classList.add("show");
+    }
+    function closeFinalizeModal(){
+      finalizeModalOpen = false;
+      document.getElementById("finalizeModal").classList.remove("show");
+    }
+
+    function renderCurrentQuestion(){
+      const qs=activeQuestionnaire||[];
+      if(questionnaireLoading){
+        document.getElementById("questionProgress").textContent="正在生成问卷...";
+        document.getElementById("questionTitle").textContent="正在准备澄清问题，请稍候";
+        document.getElementById("questionDimension").textContent="系统正在读取项目上下文并生成问题";
+        document.getElementById("questionType").textContent="";
+        document.getElementById("questionOptions").innerHTML='<div style="font-size:13px;color:var(--muted);line-height:1.8;">已启动后台思考流程，题目将分批加载到窗口。</div>';
+        document.getElementById("prevQuestionBtn").style.display="none";
+        document.getElementById("nextQuestionBtn").style.display="none";
+        document.getElementById("finishQuestionBtn").style.display="none";
+        return;
+      }
+      if(qs.length===0){
+        document.getElementById("questionProgress").textContent="正在加载题目...";
+        document.getElementById("questionTitle").textContent="请稍候";
+        document.getElementById("questionDimension").textContent="";
+        document.getElementById("questionType").textContent="";
+        document.getElementById("questionOptions").innerHTML='<div style="font-size:13px;color:var(--muted);">题目将很快显示。</div>';
+        document.getElementById("prevQuestionBtn").style.display="none";
+        document.getElementById("nextQuestionBtn").style.display="none";
+        document.getElementById("finishQuestionBtn").style.display="none";
+        return;
+      }
+      const q=qs[questionIndex];
+      document.getElementById("questionProgress").textContent=`第 ${questionIndex+1} / ${qs.length} 题`;
+      document.getElementById("questionTitle").textContent=q.questionText;
+      document.getElementById("questionDimension").textContent=`维度：${q.dimension}`;
+      const type = q.questionType === "multiple" ? "multiple" : "single";
+      document.getElementById("questionType").textContent = `题型：${type==="multiple"?"多选":"单选"}`;
+      if(type==="single" && typeof answers[q.id] !== "string"){ answers[q.id]=q.options[0]; }
+      if(type==="multiple" && !Array.isArray(answers[q.id])){ answers[q.id]=[]; }
+      const selectedSingle = typeof answers[q.id] === "string" ? answers[q.id] : q.options[0];
+      const selectedMulti = Array.isArray(answers[q.id]) ? answers[q.id] : [];
+      const optionsHtml=q.options.map((opt)=>{
+        const escapedQid = q.id.replace(/'/g,"\\'");
+        const escapedOpt = opt.replace(/'/g,"\\'");
+        if(type==="multiple"){
+          return `<label class="q-option"><input type="checkbox" name="modal_q_${q.id}" value="${esc(opt)}" ${selectedMulti.includes(opt)?"checked":""} onchange="toggleModalAnswer('${escapedQid}','${escapedOpt}',this.checked)"/> <span>${esc(opt)}</span></label>`;
+        }
+        return `<label class="q-option"><input type="radio" name="modal_q_${q.id}" value="${esc(opt)}" ${selectedSingle===opt?"checked":""} onchange="setModalAnswer('${escapedQid}','${escapedOpt}')"/> <span>${esc(opt)}</span></label>`;
+      }).join("");
+      document.getElementById("questionOptions").innerHTML=optionsHtml;
+      document.getElementById("prevQuestionBtn").style.display="inline-block";
+      document.getElementById("prevQuestionBtn").disabled=questionIndex===0;
+      const isLast=questionIndex===qs.length-1;
+      document.getElementById("nextQuestionBtn").style.display=isLast?"none":"inline-block";
+      const finishBtn = document.getElementById("finishQuestionBtn");
+      if(isLast){
+        finishBtn.style.display="inline-block";
+        if(questionnaireFullyLoaded){
+          finishBtn.disabled=false;
+          finishBtn.textContent="完成问卷";
+        }else{
+          finishBtn.disabled=true;
+          finishBtn.textContent="后台补题中...";
+        }
+      }else{
+        finishBtn.style.display="none";
+        finishBtn.disabled=false;
+        finishBtn.textContent="完成问卷";
+      }
+    }
+
+    function scheduleBackgroundFinalize(reason){
+      if(finalizeDebounceTimer){ clearTimeout(finalizeDebounceTimer); finalizeDebounceTimer = null; }
+      finalizeDebounceTimer = setTimeout(()=>{
+        void runBackgroundFinalize(reason);
+      }, 1200);
+    }
+    async function runBackgroundFinalize(reason){
+      if(backgroundFinalizeRunning){
+        backgroundFinalizePending = true;
+        return;
+      }
+      const requirement=(document.getElementById("businessGoalInput").value||"").trim();
+      const llm=buildTaskLlmConfig();
+      if(!requirement || !llm) return;
+      backgroundFinalizeRunning = true;
+      const seq = ++backgroundFinalizeSeq;
+      const currentFingerprint = buildAnswersFingerprint();
+      try{
+        const finalData = await finalizeRequirementInternal(requirement,llm,{persistDraft:false});
+        if(seq !== backgroundFinalizeSeq) return;
+        finalizedRequirement = finalData.finalRequirement || finalizedRequirement || requirement;
+        lastFinalizedFingerprint = currentFingerprint;
+        lastFinalizedAt = Date.now();
+      }catch(_err){
+      }finally{
+        backgroundFinalizeRunning = false;
+        if(backgroundFinalizePending){
+          backgroundFinalizePending = false;
+          void runBackgroundFinalize("pending");
+        }
+      }
+    }
+    function setModalAnswer(qid,opt){ answers[qid]=opt; scheduleBackgroundFinalize("single"); }
+    function toggleModalAnswer(qid,opt,checked){
+      if(!Array.isArray(answers[qid])) answers[qid]=[];
+      const next = new Set(answers[qid]);
+      if(checked) next.add(opt);
+      else next.delete(opt);
+      answers[qid]=Array.from(next);
+      scheduleBackgroundFinalize("multiple");
+    }
+    function prevQuestion(){ if(questionIndex>0){ questionIndex--; renderCurrentQuestion(); } }
+    function nextQuestion(){
+      const qs=activeQuestionnaire||[];
+      if(questionIndex<qs.length-1){
+        questionIndex++;
+        renderCurrentQuestion();
+        return;
+      }
+      if(!questionnaireFullyLoaded){
+        addLog("系统","题库仍在后台加载中，请稍候几秒。");
+      }
+    }
+
+    async function finalizeRequirementInternal(requirement,llm,options={}){
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const workspace=workspacePath ? { path:workspacePath } : (getWorkspacePathConfig()||{});
+      const persistDraft = options.persistDraft !== false;
+      const resp=await fetch(API_BASE+"/api/v1/elicitation/finalize",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          requirement,
+          questionnaire: { questions: getFlattenQuestionnaire() },
+          answers:normalizeAnswersForApi(),
+          persistDraft,
+          llm,
+          workspace
+        })
+      });
+      const data=await resp.json();
+      if(!resp.ok) throw new Error(data?.message||"需求定稿失败");
+      return data;
+    }
+    function logFinalizeMeta(data){
+      const meta = data?.meta || {};
+      addLog("系统","========== 定稿阶段执行信息 ==========");
+      addLog("系统",`PRD MCP 可用: ${meta.prdMcpAvailable ? "是" : "否"}`);
+      addLog("系统",`PRD MCP 尝试调用: ${meta.prdMcpAttempted ? "是" : "否"}`);
+      addLog("系统",`PRD MCP 命中工具: ${meta.prdDraftToolName || "(无)"}`);
+      if(Array.isArray(meta.availableTools)){
+        addLog("系统",`当前 MCP 可用工具: ${meta.availableTools.join(", ") || "(空)"}`);
+      }
+      if(meta.prdDraftEnabled){
+        addLog("系统","本次定稿已吸收 PRD MCP 草案。","success");
+      }else{
+        addLog("系统",`PRD MCP 未命中，已回退本地定稿逻辑。原因：${meta.prdMcpReason || "未提供"}`,"error");
+      }
+      if(meta?.prdMcpDiagnosis){
+        const d = meta.prdMcpDiagnosis;
+        addLog("系统",`MCP 诊断: ${d.hint || "无"}`);
+        addLog("系统",`诊断标记 => 未安装:${d.likelyNotInstalled ? "是":"否"} 网络问题:${d.likelyNetworkOrRegistry ? "是":"否"} 运行异常:${d.likelyRuntimeFailure ? "是":"否"}`);
+      }
+      if(meta?.draftFiles){
+        const f = meta.draftFiles;
+        addLog("系统",`中间文件(runId=${f.runId || "unknown"})`);
+        addLog("系统",`- status: ${f.statusPath}`);
+        addLog("系统",`- raw: ${f.rawPath}`);
+        addLog("系统",`- normalized: ${f.normalizedPath}`);
+        addLog("系统",`- finalize_input: ${f.inputPath}`);
+        addLog("系统",`- fused_final: ${f.finalPath}`);
+      }
+      addLog("系统","=====================================");
+    }
+
+    async function regenerateFinalRequirement(){
+      const requirement=(document.getElementById("businessGoalInput").value||"").trim();
+      const llm=buildTaskLlmConfig();
+      if(!llm){ addLog("错误","请先配置 API Key","error"); return; }
+      addLog("系统","正在重新生成定稿...");
+      try{
+        const finalData = await finalizeRequirementInternal(requirement,llm,{persistDraft:true});
+        finalizedRequirement = finalData.finalRequirement || finalizedRequirement || requirement;
+        document.getElementById("finalRequirementEditor").value = finalizedRequirement;
+        logFinalizeMeta(finalData);
+        lastFinalizedFingerprint = buildAnswersFingerprint();
+        lastFinalizedAt = Date.now();
+        addLog("系统","定稿已重新生成。","success");
+      }catch(error){
+        addLog("错误",String(error?.message||error),"error");
+      }
+    }
+    function confirmFinalRequirement(){
+      const text = (document.getElementById("finalRequirementEditor").value||"").trim();
+      if(!text){ addLog("错误","定稿内容不能为空","error"); return; }
+      finalizedRequirement = text;
+      lastFinalizedFingerprint = buildAnswersFingerprint();
+      lastFinalizedAt = Date.now();
+      closeFinalizeModal();
+      addLog("系统","定稿已确认，可直接启动设计生成。","success");
+    }
+
+    async function finishQuestionnaire(){
+      const requirement=(document.getElementById("businessGoalInput").value||"").trim();
+      const llm=buildTaskLlmConfig();
+      if(!llm){ addLog("错误","请先配置 API Key","error"); return; }
+      if(!questionnaireFullyLoaded){
+        addLog("系统","题库仍在后台补充，请稍候后再完成问卷。");
+        renderCurrentQuestion();
+        return;
+      }
+      backgroundElicitationStop = true;
+      closeQuestionnaireModal();
+      if(finalizeDebounceTimer){ clearTimeout(finalizeDebounceTimer); finalizeDebounceTimer = null; }
+      const latestFingerprint = buildAnswersFingerprint();
+      const canReuseFinalized = finalizedRequirement && latestFingerprint === lastFinalizedFingerprint && (Date.now() - lastFinalizedAt < 15000);
+      if(canReuseFinalized){
+        openFinalizeModal(finalizedRequirement);
+        addLog("系统","需求已在作答过程中实时定稿完成，请确认或编辑后继续。","success");
+        return;
+      }
+      finalizeInProgress = true;
+      addLog("系统","正在补齐最后一次定稿同步...");
+      try{
+        if(backgroundFinalizeRunning){
+          const waitStart = Date.now();
+          while(backgroundFinalizeRunning && Date.now() - waitStart < 15000){
+            await new Promise((r)=>setTimeout(r,150));
+          }
+        }
+        const finalData = await finalizeRequirementInternal(requirement,llm,{persistDraft:true});
+        finalizedRequirement = finalData.finalRequirement || finalizedRequirement || requirement;
+        logFinalizeMeta(finalData);
+        lastFinalizedFingerprint = latestFingerprint;
+        lastFinalizedAt = Date.now();
+        openFinalizeModal(finalizedRequirement);
+        addLog("系统","需求定稿完成，请确认或编辑后继续。","success");
+      }catch(error){
+        addLog("错误",String(error?.message||error),"error");
+      }finally{
+        finalizeInProgress = false;
+      }
     }
 
     async function startDesignOnly(){
-      const requirement=(document.getElementById("businessGoalInput").value||"").trim();
-      if(!requirement){ addLog("错误","请先输入业务目标","error"); return; }
-      const llm=buildTaskLlmConfig();
-      if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
+      let requirement=(finalizedRequirement||"").trim();
+      if(!requirement){ requirement=(document.getElementById("businessGoalInput").value||"").trim(); }
+      if(!requirement){ addLog("错误","请先输入业务目标并完成澄清","error"); return; }
+      if(finalizeInProgress){ addLog("系统","需求定稿仍在后台处理中，请稍候..."); return; }
+      if(finalizeModalOpen){ addLog("系统","请先在定稿窗口中确认需求。"); return; }
+      const llm=buildTaskLlmConfig(); if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-      const workspace=workspacePath ? { path: workspacePath } : (getWorkspacePathConfig()||{});
-      const userAnswers=collectUserAnswers();
+      const workspace=workspacePath ? { path:workspacePath } : (getWorkspacePathConfig()||{});
       document.getElementById("designBtn").disabled=true;
       addLog("系统","正在提交设计任务...");
       try{
-        const resp=await fetch(API_BASE+"/api/v1/tasks/design-only",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ requirement, llm, workspace, userAnswers }) });
+        const resp=await fetch(API_BASE+"/api/v1/tasks/design-only",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            requirement,
+            llm,
+            workspace,
+          questionnaire: { questions: getFlattenQuestionnaire() },
+          userAnswers:normalizeAnswersForApi()
+          })
+        });
         const data=await resp.json();
-        if(!resp.ok){ addLog("错误", data?.message||"任务提交失败","error"); return; }
+        if(!resp.ok){ addLog("错误",data?.message||"任务提交失败","error"); return; }
         currentTaskId=data.taskId;
         document.getElementById("currentTaskId").textContent=currentTaskId;
         activateState("INTENT_ANALYSIS");
         updateFileTree([]);
         connectWebSocketForTask(currentTaskId);
         addLog("系统",`任务创建成功：${currentTaskId}`,"success");
-      }catch(error){ addLog("错误", String(error?.message||error),"error"); }
+      }catch(error){ addLog("错误",String(error?.message||error),"error"); }
       finally { document.getElementById("designBtn").disabled=false; }
     }
-
-    async function chooseWorkspaceFolder(){
-      try{
-        const resp=await fetch(API_BASE+"/api/v1/config/workspace/choose",{ method:"POST" });
-        const data=await resp.json();
-        if(!resp.ok || !data?.path){ addLog("错误", data?.message||"未选择目录", "error"); return; }
-        document.getElementById("workspacePath").value=data.path;
-        validateWorkspace();
-        addLog("系统",`已选择输出目录：${data.path}`,"success");
-      }catch(error){ addLog("错误", String(error?.message||error),"error"); }
-    }
-
-    async function testLlmConnection(){
-      const llm=buildTaskLlmConfig(); if(!llm){ addLog("错误","请先输入 API Key","error"); return; }
-      try{ const resp=await fetch(API_BASE+"/api/v1/config/llm/test",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ llm }) }); addLog("系统", resp.ok?"LLM 连接测试成功":"LLM 连接测试失败", resp.ok?"success":"error"); }
-      catch { addLog("错误","LLM 连接测试失败","error"); }
-    }
-
-    function validateWorkspace(){
-      const p=(document.getElementById("workspacePath").value||"").trim();
-      if(!p){ document.getElementById("workspaceStatus").textContent="未设置"; document.getElementById("workspacePathLabel").textContent="output"; setWorkspacePathConfig(""); return; }
-      document.getElementById("workspaceStatus").textContent=`当前目录：${p}`;
-      document.getElementById("workspacePathLabel").textContent=p;
-      setWorkspacePathConfig(p);
-    }
-
-    function saveSettings(){ const llm=buildTaskLlmConfig(); if(!llm){ addLog("错误","保存失败：API Key 不能为空","error"); return; } updateLlmChip(true); validateWorkspace(); closeSettings(); addLog("系统","设置已保存（LLM 会话隔离，Workspace 全局共享）","success"); }
 
     async function loadSettings(){
       try{ const resp=await fetch(API_BASE+"/api/v1/config"); if(resp.ok){ const conf=await resp.json(); document.getElementById("llmBaseUrl").value=conf?.llm?.baseUrl||"https://api.deepseek.com"; document.getElementById("llmModelName").value=conf?.llm?.modelName||"deepseek-chat"; document.getElementById("workspacePath").value=conf?.workspace?.path||"output"; } } catch {}
       const llm=getSessionLlmConfig();
       if(llm){ document.getElementById("llmBaseUrl").value=llm.baseUrl||""; document.getElementById("llmApiKey").value=llm.apiKey||""; document.getElementById("llmModelName").value=llm.modelName||""; }
+      document.getElementById("elicitationMode").value=getElicitationMode();
       updateLlmChip(Boolean(llm&&llm.apiKey));
-      const w=getWorkspacePathConfig();
-      if(w?.path){ document.getElementById("workspacePath").value=w.path; }
+      const w=getWorkspacePathConfig(); if(w?.path){ document.getElementById("workspacePath").value=w.path; }
       validateWorkspace();
     }
 
-    document.addEventListener("DOMContentLoaded", ()=>{
-      loadSettings();
-      connectWebSocket(null);
-      activateState("IDLE");
-      addLog("系统","界面已就绪，先生成澄清问卷再启动任务");
-    });
+    document.addEventListener("DOMContentLoaded",()=>{ loadSettings(); connectWebSocket(null); activateState("IDLE"); addLog("系统","界面已就绪：先点 AI 澄清，再生成设计套件"); });
   </script>
 </body>
 </html>

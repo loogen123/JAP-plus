@@ -51,7 +51,7 @@ const workflow = new StateGraph<JapState>({
       default: () => null,
     },
     userAnswers: {
-      reducer: replaceValue<Record<string, string>>,
+      reducer: replaceValue<Record<string, string | string[]>>,
       default: () => ({}),
     },
     artifacts: {

@@ -1,0 +1,205 @@
+{"level":"info","message":"Starting PRD Creator MCP Server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.015Z"}
+{"level":"info","message":"Initializing storage...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.017Z"}
+{"level":"info","message":"Initializing storage layer","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.017Z"}
+{"level":"info","message":"Initializing SQLite database at C:\\Users\\13808\\AppData\\Local\\npm-cache\\_npx\\fad007c2b4234300\\node_modules\\prd-creator-mcp\\data\\prd-creator.db","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.017Z"}
+{"level":"info","message":"Database schema created successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.029Z"}
+{"level":"info","message":"Added deleted column to templates table","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.031Z"}
+{"level":"info","message":"Initializing default templates","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.034Z"}
+{"level":"info","message":"Created new template: comprehensive (5f26d49b-26c2-4418-b3a6-916e86731444)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.038Z"}
+{"level":"info","message":"Added default template: comprehensive","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.039Z"}
+{"level":"info","message":"Created new template: standard (f08ee88e-4b07-469d-8483-0ea6f374a50a)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.041Z"}
+{"level":"info","message":"Added default template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.042Z"}
+{"level":"info","message":"Storage layer initialized successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.042Z"}
+{"level":"info","message":"Creating MCP server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.042Z"}
+{"level":"info","message":"Registering PRD Creator tools","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.045Z"}
+{"level":"info","message":"All PRD Creator tools registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.045Z"}
+{"level":"info","message":"Registering PRD Creator resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.045Z"}
+{"level":"info","message":"Registering PRD Templates resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.045Z"}
+{"level":"info","message":"PRD Templates resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.045Z"}
+{"level":"info","message":"All PRD Creator resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.045Z"}
+{"level":"info","message":"Connecting server with STDIO transport...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.045Z"}
+{"level":"info","message":"PRD Creator MCP Server running with STDIO transport","service":"prd-creator-mcp","timestamp":"2026-04-11T09:24:44.045Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:26:23.685Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:26:23.691Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:26:23.692Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:26:23.693Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:26:23.701Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:26:23.820Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:26:23.827Z"}
+{"level":"info","message":"Starting PRD Creator MCP Server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.240Z"}
+{"level":"info","message":"Initializing storage...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.242Z"}
+{"level":"info","message":"Initializing storage layer","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.242Z"}
+{"level":"info","message":"Initializing SQLite database at C:\\Users\\13808\\AppData\\Local\\npm-cache\\_npx\\fad007c2b4234300\\node_modules\\prd-creator-mcp\\data\\prd-creator.db","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.242Z"}
+{"level":"info","message":"Database schema created successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.245Z"}
+{"level":"info","message":"deleted column already exists in templates table","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.246Z"}
+{"level":"info","message":"Initializing default templates","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.246Z"}
+{"level":"info","message":"Found 2 existing templates, skipping initialization","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.247Z"}
+{"level":"info","message":"Storage layer initialized successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.247Z"}
+{"level":"info","message":"Creating MCP server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.247Z"}
+{"level":"info","message":"Registering PRD Creator tools","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.249Z"}
+{"level":"info","message":"All PRD Creator tools registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.250Z"}
+{"level":"info","message":"Registering PRD Creator resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.250Z"}
+{"level":"info","message":"Registering PRD Templates resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.250Z"}
+{"level":"info","message":"PRD Templates resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.250Z"}
+{"level":"info","message":"All PRD Creator resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.250Z"}
+{"level":"info","message":"Connecting server with STDIO transport...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.250Z"}
+{"level":"info","message":"PRD Creator MCP Server running with STDIO transport","service":"prd-creator-mcp","timestamp":"2026-04-11T09:35:42.250Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:36:37.704Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:36:37.707Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:36:37.708Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:36:37.708Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:36:37.716Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:36:37.744Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:36:37.748Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:37:45.761Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:37:45.762Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:37:45.763Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:37:45.763Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:37:45.767Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:37:45.768Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:37:45.772Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:25.969Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:25.971Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:25.971Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:25.972Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:25.979Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:25.981Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:25.986Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:47.838Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:47.839Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:47.840Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:47.840Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:47.849Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:47.850Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:38:47.856Z"}
+{"level":"info","message":"Starting PRD Creator MCP Server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.416Z"}
+{"level":"info","message":"Initializing storage...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.417Z"}
+{"level":"info","message":"Initializing storage layer","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.418Z"}
+{"level":"info","message":"Initializing SQLite database at D:\\GitProgram\\JAP plus\\node_modules\\prd-creator-mcp\\data\\prd-creator.db","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.418Z"}
+{"level":"info","message":"Database schema created successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.600Z"}
+{"level":"info","message":"Added deleted column to templates table","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.612Z"}
+{"level":"info","message":"Initializing default templates","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.637Z"}
+{"level":"info","message":"Created new template: comprehensive (97a04b3b-05ee-47fe-83fc-980e3c11df5c)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.652Z"}
+{"level":"info","message":"Added default template: comprehensive","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.652Z"}
+{"level":"info","message":"Created new template: standard (138b3b49-3ee7-4505-84ce-3171a580a670)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.663Z"}
+{"level":"info","message":"Added default template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.663Z"}
+{"level":"info","message":"Storage layer initialized successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.664Z"}
+{"level":"info","message":"Creating MCP server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.664Z"}
+{"level":"info","message":"Registering PRD Creator tools","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.667Z"}
+{"level":"info","message":"All PRD Creator tools registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.667Z"}
+{"level":"info","message":"Registering PRD Creator resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.667Z"}
+{"level":"info","message":"Registering PRD Templates resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.667Z"}
+{"level":"info","message":"PRD Templates resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.667Z"}
+{"level":"info","message":"All PRD Creator resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.667Z"}
+{"level":"info","message":"Connecting server with STDIO transport...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.667Z"}
+{"level":"info","message":"PRD Creator MCP Server running with STDIO transport","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.667Z"}
+{"level":"info","message":"Generating PRD for \"Test Product\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.716Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.717Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.717Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.718Z"}
+{"level":"info","message":"Generating PRD for \"Test Product\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.730Z"}
+{"level":"info","message":"PRD generated successfully for \"Test Product\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.740Z"}
+{"level":"info","message":"PRD generated successfully for \"Test Product\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:53:48.752Z"}
+{"level":"info","message":"Starting PRD Creator MCP Server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.280Z"}
+{"level":"info","message":"Initializing storage...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.281Z"}
+{"level":"info","message":"Initializing storage layer","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.282Z"}
+{"level":"info","message":"Initializing SQLite database at D:\\GitProgram\\JAP plus\\node_modules\\prd-creator-mcp\\data\\prd-creator.db","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.282Z"}
+{"level":"info","message":"Database schema created successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.286Z"}
+{"level":"info","message":"deleted column already exists in templates table","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.290Z"}
+{"level":"info","message":"Initializing default templates","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.291Z"}
+{"level":"info","message":"Found 2 existing templates, skipping initialization","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.292Z"}
+{"level":"info","message":"Storage layer initialized successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.292Z"}
+{"level":"info","message":"Creating MCP server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.292Z"}
+{"level":"info","message":"Registering PRD Creator tools","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.295Z"}
+{"level":"info","message":"All PRD Creator tools registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.295Z"}
+{"level":"info","message":"Registering PRD Creator resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.295Z"}
+{"level":"info","message":"Registering PRD Templates resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.295Z"}
+{"level":"info","message":"PRD Templates resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.295Z"}
+{"level":"info","message":"All PRD Creator resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.295Z"}
+{"level":"info","message":"Connecting server with STDIO transport...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.295Z"}
+{"level":"info","message":"PRD Creator MCP Server running with STDIO transport","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.296Z"}
+{"level":"info","message":"Generating PRD for \"Test Product\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.329Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.330Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.330Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.330Z"}
+{"level":"info","message":"Generating PRD for \"Test Product\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.368Z"}
+{"level":"info","message":"PRD generated successfully for \"Test Product\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.378Z"}
+{"level":"info","message":"PRD generated successfully for \"Test Product\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:55:43.488Z"}
+{"level":"info","message":"Starting PRD Creator MCP Server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:52.998Z"}
+{"level":"info","message":"Initializing storage...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:52.999Z"}
+{"level":"info","message":"Initializing storage layer","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:52.999Z"}
+{"level":"info","message":"Initializing SQLite database at D:\\GitProgram\\JAP plus\\node_modules\\prd-creator-mcp\\data\\prd-creator.db","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:52.999Z"}
+{"level":"info","message":"Database schema created successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.002Z"}
+{"level":"info","message":"deleted column already exists in templates table","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.003Z"}
+{"level":"info","message":"Initializing default templates","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.003Z"}
+{"level":"info","message":"Found 2 existing templates, skipping initialization","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.004Z"}
+{"level":"info","message":"Storage layer initialized successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.004Z"}
+{"level":"info","message":"Creating MCP server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.004Z"}
+{"level":"info","message":"Registering PRD Creator tools","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.006Z"}
+{"level":"info","message":"All PRD Creator tools registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.007Z"}
+{"level":"info","message":"Registering PRD Creator resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.007Z"}
+{"level":"info","message":"Registering PRD Templates resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.007Z"}
+{"level":"info","message":"PRD Templates resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.007Z"}
+{"level":"info","message":"All PRD Creator resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.007Z"}
+{"level":"info","message":"Connecting server with STDIO transport...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.007Z"}
+{"level":"info","message":"PRD Creator MCP Server running with STDIO transport","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.007Z"}
+{"level":"info","message":"Generating PRD for \"MCP Test\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.043Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.044Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.044Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.045Z"}
+{"level":"info","message":"Generating PRD for \"MCP Test\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.078Z"}
+{"level":"info","message":"PRD generated successfully for \"MCP Test\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.088Z"}
+{"level":"info","message":"PRD generated successfully for \"MCP Test\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:56:53.201Z"}
+{"level":"info","message":"Starting PRD Creator MCP Server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.806Z"}
+{"level":"info","message":"Initializing storage...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.808Z"}
+{"level":"info","message":"Initializing storage layer","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.808Z"}
+{"level":"info","message":"Initializing SQLite database at D:\\GitProgram\\JAP plus\\node_modules\\prd-creator-mcp\\data\\prd-creator.db","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.808Z"}
+{"level":"info","message":"Database schema created successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.811Z"}
+{"level":"info","message":"deleted column already exists in templates table","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.811Z"}
+{"level":"info","message":"Initializing default templates","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.812Z"}
+{"level":"info","message":"Found 2 existing templates, skipping initialization","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.812Z"}
+{"level":"info","message":"Storage layer initialized successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.813Z"}
+{"level":"info","message":"Creating MCP server...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.813Z"}
+{"level":"info","message":"Registering PRD Creator tools","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.815Z"}
+{"level":"info","message":"All PRD Creator tools registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.815Z"}
+{"level":"info","message":"Registering PRD Creator resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.815Z"}
+{"level":"info","message":"Registering PRD Templates resources","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.816Z"}
+{"level":"info","message":"PRD Templates resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.816Z"}
+{"level":"info","message":"All PRD Creator resources registered successfully","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.816Z"}
+{"level":"info","message":"Connecting server with STDIO transport...","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.816Z"}
+{"level":"info","message":"PRD Creator MCP Server running with STDIO transport","service":"prd-creator-mcp","timestamp":"2026-04-11T09:57:50.816Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:58:39.495Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:58:39.497Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:58:39.497Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:58:39.497Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:58:39.505Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:58:39.532Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:58:39.539Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T09:59:20.024Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:59:20.026Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T09:59:20.027Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:59:20.027Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:59:20.034Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T09:59:20.036Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T09:59:20.041Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T10:00:01.816Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:00:01.820Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T10:00:01.820Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:00:01.820Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T10:00:01.825Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T10:00:01.827Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:00:01.830Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:00.242Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:00.243Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:00.244Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:00.244Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:00.251Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:00.252Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:00.260Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template: standard","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:16.039Z"}
+{"level":"info","message":"Loaded AI provider configurations (merged env + persistent config)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:16.041Z"}
+{"level":"info","message":"Configured providers: openai, template","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:16.042Z"}
+{"level":"info","message":"Using preferred provider: Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:16.042Z"}
+{"level":"info","message":"Generating PRD for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:16.048Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using template fallback","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:16.048Z"}
+{"level":"info","message":"PRD generated successfully for \"JAP Final Requirement\" using Template-based (No AI)","service":"prd-creator-mcp","timestamp":"2026-04-11T10:01:16.050Z"}

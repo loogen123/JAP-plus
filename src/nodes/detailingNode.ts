@@ -1,6 +1,7 @@
-﻿import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 
+import { loadSkillContext } from "../runtime/skillContext.js";
 import { emitLogAdded, emitStageChanged } from "../runtime/workflowEvents.js";
 import { DetailingOutputSchema, type JapState } from "../state/japState.js";
 
@@ -21,6 +22,41 @@ Hard constraints:
 3. 07 must be a valid Postman Collection v2.1.0 JSON that covers APIs defined in 04.
 4. Return strictly schema fields with no extra explanation.
 `.trim();
+
+function extractTextFromMessageContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        if (
+          item &&
+          typeof item === "object" &&
+          "type" in item &&
+          (item as { type?: string }).type === "text" &&
+          "text" in item
+        ) {
+          return String((item as { text?: unknown }).text ?? "");
+        }
+        return "";
+      })
+      .join("\n");
+  }
+  return "";
+}
+
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    return null;
+  }
+  return text.slice(start, end + 1);
+}
 
 function getMockDetailingArtifacts() {
   return {
@@ -120,32 +156,75 @@ export async function detailingNode(
         baseURL: state.llmConfig?.baseUrl || "https://api.deepseek.com",
       },
       temperature: 0.2,
-      timeout: 20000,
+      timeout: 45000,
       maxRetries: 0,
     });
 
-    const structuredModel = model.withStructuredOutput(DetailingOutputSchema);
+    const structuredModel = model.withStructuredOutput(DetailingOutputSchema, {
+      method: "functionCalling",
+    });
 
-    const result = await structuredModel.invoke([
-      new SystemMessage(DETAILING_SYSTEM_PROMPT),
-      new HumanMessage(
-        [
-          "Generate artifacts 05-07 from these base documents:",
-          "",
-          "### 01_产品功能脑图与用例.md",
-          state.artifacts["01_\u4ea7\u54c1\u529f\u80fd\u8111\u56fe\u4e0e\u7528\u4f8b.md"],
-          "",
-          "### 02_领域模型与物理表结构.md",
-          state.artifacts["02_\u9886\u57df\u6a21\u578b\u4e0e\u7269\u7406\u8868\u7ed3\u6784.md"],
-          "",
-          "### 03_核心业务状态机.md",
-          state.artifacts["03_\u6838\u5fc3\u4e1a\u52a1\u72b6\u6001\u673a.md"],
-          "",
-          "### 04_RESTful_API契约.yaml",
-          state.artifacts["04_RESTful_API\u5951\u7ea6.yaml"],
-        ].join("\n"),
-      ),
-    ]);
+    const detailingInput = [
+      "Generate artifacts 05-07 from these base documents:",
+      "",
+      "### 01_产品功能脑图与用例.md",
+      state.artifacts["01_\u4ea7\u54c1\u529f\u80fd\u8111\u56fe\u4e0e\u7528\u4f8b.md"],
+      "",
+      "### 02_领域模型与物理表结构.md",
+      state.artifacts["02_\u9886\u57df\u6a21\u578b\u4e0e\u7269\u7406\u8868\u7ed3\u6784.md"],
+      "",
+      "### 03_核心业务状态机.md",
+      state.artifacts["03_\u6838\u5fc3\u4e1a\u52a1\u72b6\u6001\u673a.md"],
+      "",
+      "### 04_RESTful_API契约.yaml",
+      state.artifacts["04_RESTful_API\u5951\u7ea6.yaml"],
+    ].join("\n");
+    const skillContext = await loadSkillContext(state.workspaceConfig?.path);
+    let result: ReturnType<typeof DetailingOutputSchema.parse>;
+    try {
+      result = await structuredModel.invoke([
+        new SystemMessage(DETAILING_SYSTEM_PROMPT),
+        new HumanMessage(
+          [
+            detailingInput,
+            "",
+            "Skill context:",
+            skillContext || "(none)",
+          ].join("\n"),
+        ),
+      ]);
+    } catch (structuredError) {
+      const fallbackMessage = await model.invoke([
+        new SystemMessage(
+          `${DETAILING_SYSTEM_PROMPT}\nReturn a pure JSON object only with these exact keys: "05_行为驱动验收测试.md", "06_UI原型与交互草图.html", "07_API调试集合.json".`,
+        ),
+        new HumanMessage(
+          [
+            detailingInput,
+            "",
+            "Skill context:",
+            skillContext || "(none)",
+          ].join("\n"),
+        ),
+      ]);
+      const rawText = extractTextFromMessageContent(fallbackMessage.content);
+      const rawJson = extractJsonObject(rawText);
+      if (!rawJson) {
+        throw structuredError;
+      }
+      let parsedRaw: unknown;
+      try {
+        parsedRaw = JSON.parse(rawJson);
+      } catch {
+        throw structuredError;
+      }
+      const parsed = DetailingOutputSchema.safeParse(parsedRaw);
+      if (!parsed.success) {
+        throw structuredError;
+      }
+      result = parsed.data;
+      emitLogAdded("INFO", "细化回退", "已自动切换 JSON 解析模式完成细化交付。");
+    }
 
     emitLogAdded("SUCCESS", "细化交付完成", "细节交付物 05-07 已生成。");
     return {

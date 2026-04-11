@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 
 export const QuestionDimensionSchema = z.enum([
   "\u6838\u5fc3\u5b9e\u4f53",
@@ -10,12 +10,13 @@ export const QuestionDimensionSchema = z.enum([
 export const QuestionSchema = z.object({
   id: z.string(),
   dimension: QuestionDimensionSchema,
+  questionType: z.enum(["single", "multiple"]),
   questionText: z.string(),
-  options: z.array(z.string()),
+  options: z.array(z.string()).min(2).max(8),
 });
 
 export const QuestionnaireSchema = z.object({
-  questions: z.array(QuestionSchema).min(5).max(8),
+  questions: z.array(QuestionSchema).min(0).max(100),
 });
 
 export const ModelingOutputSchema = z.object({
@@ -34,7 +35,7 @@ export const DetailingOutputSchema = z.object({
 export interface JapState {
   originalRequirement: string;
   questionnaire: z.infer<typeof QuestionnaireSchema> | null;
-  userAnswers: Record<string, string>;
+  userAnswers: Record<string, string | string[]>;
   artifacts: Record<string, string>;
   errors: string[];
   llmConfig:

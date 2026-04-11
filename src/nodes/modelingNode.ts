@@ -1,6 +1,7 @@
-﻿import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 
+import { loadSkillContext } from "../runtime/skillContext.js";
 import { emitLogAdded, emitStageChanged } from "../runtime/workflowEvents.js";
 import { ModelingOutputSchema, type JapState } from "../state/japState.js";
 
@@ -14,6 +15,67 @@ Hard constraints:
 3. File 04 must be valid OpenAPI 3.0 YAML.
 4. No explanatory text outside file content.
 `.trim();
+
+function compactModelingInput(state: JapState): string {
+  const questions = state.questionnaire?.questions ?? [];
+  const qaLines = questions
+    .map((q) => {
+      const answer = state.userAnswers[q.id];
+      const answerText = Array.isArray(answer)
+        ? answer.join(" | ")
+        : String(answer ?? "");
+      return [
+        `QID: ${q.id}`,
+        `DIM: ${q.dimension}`,
+        `Q: ${q.questionText}`,
+        `A: ${answerText || "N/A"}`,
+      ].join("\n");
+    })
+    .join("\n---\n");
+  return [
+    "Generate 4 modeling artifacts from:",
+    "originalRequirement:",
+    state.originalRequirement,
+    "",
+    "Question/Answer Snapshot:",
+    qaLines,
+  ].join("\n");
+}
+
+function extractTextFromMessageContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        if (
+          item &&
+          typeof item === "object" &&
+          "type" in item &&
+          (item as { type?: string }).type === "text" &&
+          "text" in item
+        ) {
+          return String((item as { text?: unknown }).text ?? "");
+        }
+        return "";
+      })
+      .join("\n");
+  }
+  return "";
+}
+
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    return null;
+  }
+  return text.slice(start, end + 1);
+}
 
 function getMockModelingArtifacts() {
   return {
@@ -126,28 +188,60 @@ export async function modelingNode(
         baseURL: state.llmConfig?.baseUrl || "https://api.deepseek.com",
       },
       temperature: 0.1,
-      timeout: 20000,
+      timeout: 45000,
       maxRetries: 0,
     });
 
-    const structuredModel = model.withStructuredOutput(ModelingOutputSchema);
-
-    const result = await structuredModel.invoke([
-      new SystemMessage(MODELING_SYSTEM_PROMPT),
-      new HumanMessage(
-        [
-          "Generate 4 modeling artifacts from:",
-          "originalRequirement:",
-          state.originalRequirement,
-          "",
-          "questionnaire:",
-          JSON.stringify(state.questionnaire, null, 2),
-          "",
-          "userAnswers:",
-          JSON.stringify(state.userAnswers, null, 2),
-        ].join("\n"),
-      ),
-    ]);
+    const structuredModel = model.withStructuredOutput(ModelingOutputSchema, {
+      method: "functionCalling",
+    });
+    const modelingInput = compactModelingInput(state);
+    const skillContext = await loadSkillContext(state.workspaceConfig?.path);
+    let result: ReturnType<typeof ModelingOutputSchema.parse>;
+    try {
+      result = await structuredModel.invoke([
+        new SystemMessage(MODELING_SYSTEM_PROMPT),
+        new HumanMessage(
+          [
+            modelingInput,
+            "",
+            "Skill context:",
+            skillContext || "(none)",
+          ].join("\n"),
+        ),
+      ]);
+    } catch (structuredError) {
+      const fallbackMessage = await model.invoke([
+        new SystemMessage(
+          `${MODELING_SYSTEM_PROMPT}\nReturn a pure JSON object only with these exact keys: "01_产品功能脑图与用例.md", "02_领域模型与物理表结构.md", "03_核心业务状态机.md", "04_RESTful_API契约.yaml".`,
+        ),
+        new HumanMessage(
+          [
+            modelingInput,
+            "",
+            "Skill context:",
+            skillContext || "(none)",
+          ].join("\n"),
+        ),
+      ]);
+      const rawText = extractTextFromMessageContent(fallbackMessage.content);
+      const rawJson = extractJsonObject(rawText);
+      if (!rawJson) {
+        throw structuredError;
+      }
+      let parsedRaw: unknown;
+      try {
+        parsedRaw = JSON.parse(rawJson);
+      } catch {
+        throw structuredError;
+      }
+      const parsed = ModelingOutputSchema.safeParse(parsedRaw);
+      if (!parsed.success) {
+        throw structuredError;
+      }
+      result = parsed.data;
+      emitLogAdded("INFO", "建模回退", "已自动切换 JSON 解析模式完成建模。");
+    }
 
     emitLogAdded("SUCCESS", "建模完成", "核心图纸 01-04 已生成。");
     return {

@@ -1,7 +1,8 @@
-﻿import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
+import { loadSkillContext } from "../runtime/skillContext.js";
 import { emitLogAdded, emitStageChanged } from "../runtime/workflowEvents.js";
 import type { JapState } from "../state/japState.js";
 
@@ -110,7 +111,10 @@ export async function reviewNode(state: JapState): Promise<Partial<JapState>> {
       maxRetries: 0,
     });
 
-    const structuredModel = model.withStructuredOutput(ReviewOutputSchema);
+    const structuredModel = model.withStructuredOutput(ReviewOutputSchema, {
+      method: "functionCalling",
+    });
+    const skillContext = await loadSkillContext(state.workspaceConfig?.path);
 
     const result = await structuredModel.invoke([
       new SystemMessage(REVIEW_SYSTEM_PROMPT),
@@ -129,6 +133,9 @@ export async function reviewNode(state: JapState): Promise<Partial<JapState>> {
           "",
           "### 04_RESTful_API契约.yaml",
           state.artifacts["04_RESTful_API\u5951\u7ea6.yaml"],
+          "",
+          "Skill context:",
+          skillContext || "(none)",
         ].join("\n"),
       ),
     ]);
