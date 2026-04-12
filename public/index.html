@@ -42,6 +42,10 @@
     .state-node rect { fill:#fff; stroke:var(--line2); stroke-width:1.2; transition:.2s; }
     .state-node text { fill:#3d4a66; font-size:14px; font-weight:600; }
     .state-arrow { stroke:#9cb0cc; stroke-width:1.5; transition:.2s; }
+    .state-node.active rect { filter:drop-shadow(0 0 8px rgba(98,154,255,.5)); }
+    .state-status { margin-top:8px; display:flex; align-items:center; gap:10px; font-size:13px; color:#4a5d7d; }
+    .state-status-dot { width:10px; height:10px; border-radius:999px; background:#6aa6ff; box-shadow:0 0 0 4px rgba(106,166,255,.16); }
+    .state-status-text strong { font-size:14px; color:#22467a; }
     .console-hd { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding:10px 12px; }
     .log { overflow:auto; padding:12px; background:#fafcff; height:calc(100vh - 410px); min-height:220px; }
     .log-line { border:1px solid var(--line); border-radius:10px; background:#fff; padding:8px 10px; margin-bottom:8px; font-size:13px; color:#3d4a66; }
@@ -120,6 +124,7 @@
           <g class="state-node" data-state="DONE" transform="translate(1220,48)"><rect width="120" height="72" rx="10"></rect><text x="60" y="42" text-anchor="middle">已完成</text></g>
           <g class="state-node" data-state="ERROR" transform="translate(1220,146)"><rect width="120" height="60" rx="10"></rect><text x="60" y="36" text-anchor="middle">异常</text></g>
         </svg>
+        <div class="state-status"><span id="stateStatusDot" class="state-status-dot"></span><span id="stateStatusText" class="state-status-text">当前阶段：<strong>待命</strong></span></div>
       </div>
       <div class="console-hd"><div style="font-size:14px;font-weight:600;">思考日志</div><button class="btn btn-light" style="padding:6px 10px;font-size:13px;" onclick="clearConsole()">清空</button></div>
       <div id="logContainer" class="log"></div>
@@ -130,8 +135,8 @@
       <div class="bd workspace">
         <div><div class="kv"><span>状态</span><span id="workspaceStage">就绪</span></div><div class="kv"><span>进度</span><span id="workspaceProgressText">0%</span></div><div class="progress-track"><div id="workspaceProgressBar" class="progress-bar"></div></div></div>
         <div><div class="kv"><span>文件列表</span><span id="artifactCount">0 个</span></div><div id="fileTree" class="tree">暂无生成文件</div></div>
-        <div><div class="kv"><span>预览</span><span id="previewName">--</span></div><div id="filePreview" class="preview">// 文件内容将在此显示...</div></div>
-        <div><div class="kv"><span>输出目录</span><span id="workspacePathLabel">output</span></div><div id="workspaceStatus" style="font-size:13px;color:var(--muted);">未设置</div></div>
+        <div><div class="kv"><span>预览/编辑</span><span id="previewName">--</span></div><textarea id="filePreview" class="preview" style="min-height:220px;width:100%;border:none;outline:none;resize:vertical;background:#fff;"></textarea></div>
+        <div><div class="kv"><span>操作</span><span id="workspacePathLabel">output</span></div><div id="workspaceStatus" style="font-size:13px;color:var(--muted);">未设置</div><div class="flex gap-2" style="margin-top:8px;flex-wrap:wrap;"><button id="btnGenerateNext" class="btn btn-primary" onclick="filewiseGenerateNext()">生成下一步</button><button id="btnApprove" class="btn btn-light" onclick="filewiseApprove()">通过</button><button id="btnReject" class="btn btn-light" onclick="filewiseReject()">驳回</button><button id="btnRegenerate" class="btn btn-light" onclick="filewiseRegenerate()">重生成</button><button id="btnSaveEdit" class="btn btn-light" onclick="filewiseSaveEdit()">保存编辑</button></div><input id="fileRejectReason" class="field" style="margin-top:8px;" placeholder="驳回原因（可选）" /></div>
       </div>
     </aside>
   </section>
@@ -146,7 +151,18 @@
     const SESSION_LLM_CONFIG_KEY = "jap.llm.session.config";
     const LOCAL_WORKSPACE_PATH_KEY = "jap.workspace.path";
     const SESSION_ELICITATION_MODE_KEY = "jap.elicitation.mode";
+    const LOCAL_WORKFLOW_MODE_KEY = "jap.workflow.mode";
     const STATE_ORDER = ["STANDBY","DISCOVERY","SOLUTION_DESIGN","QUALITY_REVIEW","IMPLEMENTATION_BLUEPRINT","DELIVERY_RELEASE","DONE","ERROR"];
+    const STATE_LABEL_MAP = {
+      STANDBY: "待命",
+      DISCOVERY: "需求澄清",
+      SOLUTION_DESIGN: "方案建模",
+      QUALITY_REVIEW: "质量审阅",
+      IMPLEMENTATION_BLUEPRINT: "实施蓝图",
+      DELIVERY_RELEASE: "交付发布",
+      DONE: "已完成",
+      ERROR: "异常"
+    };
     let ws = null;
     let wsReconnectTimer = null;
     let currentTaskId = null;
@@ -173,6 +189,9 @@
     let selectedHistory = null;
     let selectedHistoryDetail = null;
     let selectedHistoryPreviewKey = "final";
+    let currentRunId = null;
+    let currentRunState = null;
+    let selectedFileId = null;
 
     function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
     function normalizeAnswersForApi(){
@@ -231,6 +250,8 @@
     function setSessionLlmConfig(config){ if(config?.apiKey){ sessionStorage.setItem(SESSION_LLM_CONFIG_KEY, JSON.stringify(config)); } }
     function getElicitationMode(){ const mode=sessionStorage.getItem(SESSION_ELICITATION_MODE_KEY); return mode==="deep"?"deep":"quick"; }
     function setElicitationMode(mode){ sessionStorage.setItem(SESSION_ELICITATION_MODE_KEY, mode==="deep"?"deep":"quick"); }
+    function getWorkflowMode(){ return "filewise"; }
+    function setWorkflowMode(mode){ localStorage.setItem(LOCAL_WORKFLOW_MODE_KEY, mode==="legacy"?"legacy":"filewise"); }
     function getWorkspacePathConfig(){ const p=localStorage.getItem(LOCAL_WORKSPACE_PATH_KEY); return p?{path:p}:null; }
     function setWorkspacePathConfig(path){ if(!path){ localStorage.removeItem(LOCAL_WORKSPACE_PATH_KEY); return; } localStorage.setItem(LOCAL_WORKSPACE_PATH_KEY,path); }
 
@@ -263,14 +284,106 @@
 
     function activateState(stateName){
       const target=STATE_ORDER.includes(stateName)?stateName:"STANDBY"; const idx=STATE_ORDER.indexOf(target);
-      document.querySelectorAll(".state-node").forEach((node)=>{ const s=node.dataset.state; const rect=node.querySelector("rect"); if(!s||!rect) return; const sIdx=STATE_ORDER.indexOf(s); const active=s===target; const done=sIdx>-1&&sIdx<idx&&s!=="ERROR"; if(target==="ERROR"&&s==="ERROR"){ rect.setAttribute("fill","#ffecef"); rect.setAttribute("stroke","#ef9ca8"); rect.setAttribute("stroke-width","2"); } else if(active){ rect.setAttribute("fill","#ebf3ff"); rect.setAttribute("stroke","#6aa6ff"); rect.setAttribute("stroke-width","2"); } else if(done){ rect.setAttribute("fill","#ecfbf1"); rect.setAttribute("stroke","#79c79a"); rect.setAttribute("stroke-width","1.5"); } else { rect.setAttribute("fill","#fff"); rect.setAttribute("stroke","#d7e2f3"); rect.setAttribute("stroke-width","1.2"); } });
+      document.querySelectorAll(".state-node").forEach((node)=>{ const s=node.dataset.state; const rect=node.querySelector("rect"); if(!s||!rect) return; const sIdx=STATE_ORDER.indexOf(s); const active=s===target; const done=sIdx>-1&&sIdx<idx&&s!=="ERROR"; node.classList.toggle("active",active); if(target==="ERROR"&&s==="ERROR"){ rect.setAttribute("fill","#ffecef"); rect.setAttribute("stroke","#ef9ca8"); rect.setAttribute("stroke-width","2"); } else if(active){ rect.setAttribute("fill","#ebf3ff"); rect.setAttribute("stroke","#6aa6ff"); rect.setAttribute("stroke-width","2.6"); } else if(done){ rect.setAttribute("fill","#ecfbf1"); rect.setAttribute("stroke","#79c79a"); rect.setAttribute("stroke-width","1.5"); } else { rect.setAttribute("fill","#fff"); rect.setAttribute("stroke","#d7e2f3"); rect.setAttribute("stroke-width","1.2"); } });
       document.querySelectorAll(".state-arrow").forEach((arrow)=>{ const from=arrow.dataset.from, to=arrow.dataset.to; const f=STATE_ORDER.indexOf(from), t=STATE_ORDER.indexOf(to); const activePath=f>-1&&t>-1&&t<=idx&&target!=="ERROR"; const retryPath=target==="SOLUTION_DESIGN"&&from==="QUALITY_REVIEW"&&to==="SOLUTION_DESIGN"; arrow.setAttribute("stroke", activePath||retryPath?"#6aa6ff":"#9cb0cc"); });
+      const label = STATE_LABEL_MAP[target] || target;
+      document.getElementById("stateStatusText").innerHTML = `当前阶段：<strong>${label}</strong> (${target})`;
+      document.getElementById("stateStatusDot").style.background = target==="ERROR" ? "#e56a6a" : target==="DONE" ? "#2fb267" : "#6aa6ff";
       updateWorkspaceProgress(target);
     }
 
-    function updateFileTree(files){ const tree=document.getElementById("fileTree"), preview=document.getElementById("filePreview"), count=document.getElementById("artifactCount"); if(!Array.isArray(files)||files.length===0){ tree.textContent="暂无生成文件"; preview.textContent="// 文件内容将在此显示..."; count.textContent="0 个"; document.getElementById("previewName").textContent="--"; return; } count.textContent=`${files.length} 个`; tree.innerHTML=files.map(f=>`<div style="padding:6px 4px;border-bottom:1px dashed #e8eef9;">${esc(f)}</div>`).join(""); document.getElementById("previewName").textContent=files[0]; preview.textContent=`// 已生成文件:\n${files.join("\n")}`; }
-
-    function handleEvent(event){ if(event.type==="STAGE_CHANGED"){ const from=event?.data?.from||"-", to=event?.data?.to||"STANDBY"; activateState(to); addLog("状态",`${from} -> ${to}`); return; } if(event.type==="LOG_ADDED"){ const d=event.data||{}; const lv=d.logType==="ERROR"?"error":d.logType==="SUCCESS"?"success":"info"; addLog(d.logType||"INFO",`${d.title||""} ${d.summary||""}`.trim(),lv); return; } if(event.type==="TASK_FINISHED"){ const status=event?.data?.status==="DONE"?"DONE":"ERROR"; activateState(status); updateFileTree(Array.isArray(event?.data?.artifacts)?event.data.artifacts:[]); addLog("结果",status==="DONE"?"任务完成":"任务失败",status==="DONE"?"success":"error"); } }
+    function updateFileActionButtons(){
+      const actions = currentRunState?.actions || {};
+      const previewText = (document.getElementById("filePreview")?.value || "").trim();
+      document.getElementById("btnGenerateNext").disabled = !actions.canGenerateNext;
+      document.getElementById("btnApprove").disabled = !actions.canApprove;
+      document.getElementById("btnReject").disabled = !actions.canReject;
+      document.getElementById("btnRegenerate").disabled = !actions.canRegenerate;
+      document.getElementById("btnSaveEdit").disabled = !actions.canSaveEdit || !previewText;
+    }
+    function updateFileTree(files){
+      const tree=document.getElementById("fileTree"), preview=document.getElementById("filePreview"), count=document.getElementById("artifactCount");
+      if(!Array.isArray(files)||files.length===0){
+        tree.textContent="暂无生成文件";
+        preview.value="";
+        count.textContent="0 个";
+        document.getElementById("previewName").textContent="--";
+        updateFileActionButtons();
+        return;
+      }
+      if(typeof files[0] === "string"){
+        count.textContent=`${files.length} 个`;
+        tree.innerHTML=files.map((name)=>`<div style="padding:6px 4px;border-bottom:1px dashed #e8eef9;">${esc(name)}</div>`).join("");
+        document.getElementById("previewName").textContent=String(files[0]||"--");
+        preview.value = files.join("\n");
+        updateFileActionButtons();
+        return;
+      }
+      count.textContent=`${files.length} 个`;
+      if(!selectedFileId || !files.some((f)=>f.fileId===selectedFileId)) selectedFileId = files[0].fileId;
+      tree.innerHTML=files.map((f)=>{
+        const active=f.fileId===selectedFileId?"background:#eef4ff;":"";
+        const stage=f.fileId===currentRunState?.currentFile?" ⭐":"";
+        return `<div onclick="selectPipelineFile('${esc(f.fileId)}')" style="padding:6px 4px;border-bottom:1px dashed #e8eef9;cursor:pointer;${active}">${esc(f.fileId)} · ${esc(f.status)}${stage}</div>`;
+      }).join("");
+      const selected = files.find((f)=>f.fileId===selectedFileId) || files[0];
+      document.getElementById("previewName").textContent = `${selected.fileId} ${selected.artifactName}`;
+      updateFileActionButtons();
+    }
+    function handleEvent(event){
+      if(event.type==="STAGE_CHANGED"){
+        const from=event?.data?.from||"-", to=event?.data?.to||"STANDBY";
+        activateState(to);
+        addLog("状态",`${from} -> ${to}`);
+        return;
+      }
+      if(event.type==="LOG_ADDED"){
+        const d=event.data||{};
+        const lv=d.logType==="ERROR"?"error":d.logType==="SUCCESS"?"success":"info";
+        addLog(d.logType||"INFO",`${d.title||""} ${d.summary||""}`.trim(),lv);
+        return;
+      }
+      if(event.type==="TASK_FINISHED"){
+        const status=event?.data?.status==="DONE"?"DONE":"ERROR";
+        activateState(status);
+        updateFileTree(Array.isArray(event?.data?.artifacts)?event.data.artifacts:[]);
+        addLog("结果",status==="DONE"?"任务完成":"任务失败",status==="DONE"?"success":"error");
+        return;
+      }
+      if(event.type==="FILE_STAGE_CHANGED"){
+        const d=event?.data||{};
+        const fileId=d.fileId||"--";
+        const status=d.status||"--";
+        const err=d.error?`，原因：${d.error}`:"";
+        addLog("文件",`${fileId} -> ${status}${err}`,status==="FAILED"?"error":"info");
+        refreshFilewiseRun();
+        return;
+      }
+      if(event.type==="FILE_GENERATED"){
+        const d=event?.data||{};
+        addLog("文件",`${d.fileId||"--"} 已生成，状态=${d.status||"GENERATED"}`,"success");
+        refreshFilewiseRun();
+        return;
+      }
+      if(event.type==="FILE_APPROVED"){
+        const d=event?.data||{};
+        addLog("文件",`${d.fileId||"--"} 已通过`,"success");
+        refreshFilewiseRun();
+        return;
+      }
+      if(event.type==="FILE_REJECTED"){
+        const d=event?.data||{};
+        addLog("文件",`${d.fileId||"--"} 已驳回${d.reason?`，原因：${d.reason}`:""}`,"error");
+        refreshFilewiseRun();
+        return;
+      }
+      if(event.type==="RUN_POINTER_MOVED"){
+        const d=event?.data||{};
+        addLog("指针",`stage=${d.stage||"--"} current=${d.currentFile||"--"}`);
+        refreshFilewiseRun();
+        return;
+      }
+    }
 
     function buildTaskLlmConfig(){ const baseUrl=(document.getElementById("llmBaseUrl").value||"").trim(); const apiKey=(document.getElementById("llmApiKey").value||"").trim(); const modelName=(document.getElementById("llmModelName").value||"").trim(); const cached=getSessionLlmConfig(); const cfg={ baseUrl:baseUrl||cached?.baseUrl||"https://api.deepseek.com", apiKey:apiKey||cached?.apiKey||"", modelName:modelName||cached?.modelName||"deepseek-chat" }; if(!cfg.apiKey) return null; setSessionLlmConfig(cfg); return cfg; }
 
@@ -639,26 +752,22 @@
       const workspacePath = getHistoryWorkspacePath();
       const workspace = workspacePath ? { path: workspacePath } : (getWorkspacePathConfig()||{});
       try{
-        const resp=await fetch(API_BASE+"/api/v1/tasks/design-from-history",{
+        const reqSource = selectedHistoryDetail?.requirement?.source || "final";
+        const requirement = String(selectedHistoryDetail?.previews?.[reqSource]?.content || "").trim();
+        if(!requirement){ addLog("错误","历史需求内容为空","error"); return; }
+        const resp=await fetch(API_BASE+"/api/v1/tasks/filewise/start",{
           method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            historyId:selectedHistoryDetail.id,
-            historyType:selectedHistoryDetail.type,
-            llm,
-            workspace
-          })
+          body:JSON.stringify({ requirement, llm, workspace })
         });
         const data=await resp.json();
         if(!resp.ok){ addLog("错误",data?.message||"从历史任务继续生成失败","error"); return; }
-        currentTaskId=data.taskId;
-        setTaskIdentity(currentTaskId, data.sourceHistoryId || selectedHistoryDetail.id || "--");
-        document.getElementById("workspaceStatus").textContent=`当前目录：${data.outputDir || workspacePath || "output"}`;
-        document.getElementById("workspacePathLabel").textContent=data.outputDir || workspacePath || "output";
-        activateState("DISCOVERY");
-        updateFileTree([]);
-        connectWebSocketForTask(currentTaskId);
-        addLog("系统",`新任务ID：${data.taskId}，来源任务ID：${data.sourceHistoryId || selectedHistoryDetail.id}`,"success");
+        currentRunId = data.runId;
+        currentTaskId = data.runId;
+        setTaskIdentity(currentRunId, selectedHistoryDetail.id || "--");
+        connectWebSocketForTask(currentRunId);
+        await refreshFilewiseRun();
+        addLog("系统",`新任务ID：${currentRunId}，来源任务ID：${selectedHistoryDetail.id}`,"success");
         closeHistoryModal();
         refreshDesignButtonState();
       }catch(error){
@@ -949,6 +1058,127 @@
       }
     }
 
+    function mapFilewiseStageToUi(stage){
+      if(stage==="MODELING") return "SOLUTION_DESIGN";
+      if(stage==="REVIEW") return "QUALITY_REVIEW";
+      if(stage==="DETAILING") return "IMPLEMENTATION_BLUEPRINT";
+      if(stage==="DONE") return "DONE";
+      return "STANDBY";
+    }
+    function selectPipelineFile(fileId){
+      selectedFileId = fileId;
+      updateFileTree(currentRunState?.files || []);
+      if(currentRunState?.currentFile===fileId){
+        document.getElementById("filePreview").value = currentRunState?.currentFileContent || "";
+      }
+    }
+    async function refreshFilewiseRun(){
+      if(!currentRunId) return;
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const query = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : "";
+      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}${query}`,{ cache:"no-store" });
+      const data=await resp.json();
+      if(!resp.ok){ addLog("错误",data?.message||"读取流水线状态失败","error"); return; }
+      currentRunState = data;
+      currentTaskId = data.runId;
+      setTaskIdentity(data.runId, document.getElementById("sourceTaskId").textContent || "--");
+      activateState(mapFilewiseStageToUi(data.stage));
+      updateFileTree(data.files || []);
+      if(data.currentFile){
+        document.getElementById("previewName").textContent = data.currentFile;
+        document.getElementById("filePreview").value = data.currentFileContent || "";
+      }else{
+        document.getElementById("filePreview").value = "";
+      }
+      document.getElementById("workspaceStatus").textContent=`当前目录：${data.workspacePath || workspacePath || "output"}`;
+      document.getElementById("workspacePathLabel").textContent=data.workspacePath || workspacePath || "output";
+    }
+    async function filewiseGenerateNext(){
+      if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-next`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({workspace: workspacePath ? {path:workspacePath} : undefined})
+      });
+      const data=await resp.json();
+      if(!resp.ok){
+        const fileId=data?.currentFile;
+        const detail=Array.isArray(data?.files) && fileId ? (data.files.find((f)=>f.fileId===fileId)?.lastError || "") : "";
+        addLog("错误",[data?.message||"生成失败",detail].filter(Boolean).join(" | "),"error");
+        return;
+      }
+      currentRunState = data;
+      await refreshFilewiseRun();
+    }
+    async function filewiseApprove(){
+      if(!currentRunId || !currentRunState?.currentFile){ return; }
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const fileId = currentRunState.currentFile;
+      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/files/${encodeURIComponent(fileId)}/approve`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({workspace: workspacePath ? {path:workspacePath} : undefined})
+      });
+      const data=await resp.json();
+      if(!resp.ok){ addLog("错误",data?.message||"通过失败","error"); return; }
+      currentRunState = data;
+      await refreshFilewiseRun();
+    }
+    async function filewiseReject(){
+      if(!currentRunId || !currentRunState?.currentFile){ return; }
+      const reason=(document.getElementById("fileRejectReason").value||"").trim();
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const fileId = currentRunState.currentFile;
+      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/files/${encodeURIComponent(fileId)}/reject`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({reason,workspace: workspacePath ? {path:workspacePath} : undefined})
+      });
+      const data=await resp.json();
+      if(!resp.ok){ addLog("错误",data?.message||"驳回失败","error"); return; }
+      currentRunState = data;
+      await refreshFilewiseRun();
+    }
+    async function filewiseRegenerate(){
+      if(!currentRunId || !currentRunState?.currentFile){ return; }
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const fileId = currentRunState.currentFile;
+      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/files/${encodeURIComponent(fileId)}/regenerate`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({workspace: workspacePath ? {path:workspacePath} : undefined})
+      });
+      const data=await resp.json();
+      if(!resp.ok){
+        const fileId=data?.currentFile;
+        const detail=Array.isArray(data?.files) && fileId ? (data.files.find((f)=>f.fileId===fileId)?.lastError || "") : "";
+        addLog("错误",[data?.message||"重生成失败",detail].filter(Boolean).join(" | "),"error");
+        return;
+      }
+      currentRunState = data;
+      await refreshFilewiseRun();
+    }
+    async function filewiseSaveEdit(){
+      if(!currentRunId || !currentRunState?.currentFile){ return; }
+      const content = document.getElementById("filePreview").value || "";
+      if(!content.trim()){
+        addLog("错误","当前编辑区为空，先生成文件或输入内容后再保存","error");
+        updateFileActionButtons();
+        return;
+      }
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const fileId = currentRunState.currentFile;
+      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/files/${encodeURIComponent(fileId)}/save-edit`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({content,workspace: workspacePath ? {path:workspacePath} : undefined})
+      });
+      const data=await resp.json();
+      if(!resp.ok){ addLog("错误",data?.message||"保存失败","error"); return; }
+      currentRunState = data;
+      await refreshFilewiseRun();
+    }
     async function startDesignOnly(){
       let requirement=(finalizedRequirement||"").trim();
       if(!requirement){ requirement=(document.getElementById("businessGoalInput").value||"").trim(); }
@@ -962,25 +1192,28 @@
       refreshDesignButtonState();
       addLog("系统","正在提交设计任务...");
       try{
-        const resp=await fetch(API_BASE+"/api/v1/tasks/design-only",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            requirement,
-            llm,
-            workspace,
+        const payload = {
+          requirement,
+          llm,
+          workspace,
           questionnaire: { questions: getFlattenQuestionnaire() },
           userAnswers:normalizeAnswersForApi()
-          })
+        };
+        const resp=await fetch(API_BASE+"/api/v1/tasks/filewise/start",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(payload)
         });
         const data=await resp.json();
         if(!resp.ok){ addLog("错误",data?.message||"任务提交失败","error"); return; }
-        currentTaskId=data.taskId;
-        setTaskIdentity(currentTaskId, "--");
-        activateState("DISCOVERY");
-        updateFileTree([]);
-        connectWebSocketForTask(currentTaskId);
-        addLog("系统",`任务创建成功：${currentTaskId}`,"success");
+        currentRunId = data.runId;
+        currentTaskId = data.runId;
+        currentRunState = null;
+        selectedFileId = null;
+        setTaskIdentity(currentRunId, "--");
+        connectWebSocketForTask(currentRunId);
+        await refreshFilewiseRun();
+        addLog("系统",`任务创建成功：${currentRunId}`,"success");
       }catch(error){ addLog("错误",String(error?.message||error),"error"); }
       finally { designSubmitting = false; refreshDesignButtonState(); }
     }
@@ -990,6 +1223,7 @@
       const llm=getSessionLlmConfig();
       if(llm){ document.getElementById("llmBaseUrl").value=llm.baseUrl||""; document.getElementById("llmApiKey").value=llm.apiKey||""; document.getElementById("llmModelName").value=llm.modelName||""; }
       document.getElementById("elicitationMode").value=getElicitationMode();
+
       updateLlmChip(Boolean(llm&&llm.apiKey));
       const w=getWorkspacePathConfig(); if(w?.path){ document.getElementById("workspacePath").value=w.path; }
       validateWorkspace();
@@ -1001,6 +1235,8 @@
       document.getElementById("llmApiKey").addEventListener("input", refreshDesignButtonState);
       document.getElementById("llmBaseUrl").addEventListener("input", refreshDesignButtonState);
       document.getElementById("llmModelName").addEventListener("input", refreshDesignButtonState);
+      document.getElementById("filePreview").addEventListener("input", updateFileActionButtons);
+
       loadSettings();
       setTaskIdentity("--","--");
       connectWebSocket(null);

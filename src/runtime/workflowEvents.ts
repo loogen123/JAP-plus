@@ -23,6 +23,20 @@ function emit(type: string, data: Record<string, unknown>): void {
   });
 }
 
+function emitWithTaskId(taskId: string | null, type: string, data: Record<string, unknown>): void {
+  if (!broadcaster) {
+    return;
+  }
+  broadcaster({
+    type,
+    data: {
+      ...data,
+      taskId,
+      timestamp: new Date().toISOString(),
+    },
+  });
+}
+
 export function setBroadcaster(fn: Broadcaster): void {
   broadcaster = fn;
 }
@@ -56,4 +70,12 @@ export function emitTaskFinished(
   extras: Record<string, unknown> = {},
 ): void {
   emit("TASK_FINISHED", { status, ...extras });
+}
+
+export function emitTaskScopedEvent(
+  taskId: string,
+  type: string,
+  data: Record<string, unknown> = {},
+): void {
+  emitWithTaskId(taskId, type, data);
 }

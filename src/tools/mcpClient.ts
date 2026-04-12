@@ -485,6 +485,30 @@ export class JapMcpClient {
     };
   }
 
+  async callTextToolByCandidates(
+    candidateNames: string[],
+    payload: Record<string, unknown>,
+  ): Promise<{ content: string; toolName: string } | null> {
+    const called = await this.callToolByCandidateNames(candidateNames, payload);
+    if (!called) {
+      return null;
+    }
+    let text = flattenTextBlocks(called.result?.content);
+    if (!text && typeof called.result?.result === "string") {
+      text = String(called.result.result).trim();
+    }
+    if (!text && typeof called.result?.data === "string") {
+      text = String(called.result.data).trim();
+    }
+    if (!text) {
+      return null;
+    }
+    return {
+      content: text,
+      toolName: called.name,
+    };
+  }
+
   async close(): Promise<void> {
     for (const { client } of this.clients) {
       await client.close();
