@@ -1,8 +1,9 @@
-﻿import fs from "node:fs/promises";
+import fs from "node:fs/promises";
 import path from "node:path";
 
 import { END, START, StateGraph } from "@langchain/langgraph";
 
+import { WORKFLOW_LOG_TEXT } from "../constants/logTexts.js";
 import { detailingNode } from "../nodes/detailingNode.js";
 import { generateQuestionnaire } from "../nodes/elicitationNode.js";
 import { modelingNode } from "../nodes/modelingNode.js";
@@ -14,8 +15,8 @@ import { JapMcpClient } from "../tools/mcpClient.js";
 const replaceValue = <T>(_left: T, right: T): T => right;
 
 async function presentationNode(state: JapState): Promise<Partial<JapState>> {
-  emitStageChanged("PRESENTATION");
-  emitLogAdded("INFO", "交付写盘启动", "开始写入 output 目录。");
+  emitStageChanged("DELIVERY_RELEASE");
+  emitLogAdded("INFO", WORKFLOW_LOG_TEXT.presentStartTitle, WORKFLOW_LOG_TEXT.presentStartSummary);
 
   const projectRoot = path.resolve(process.cwd());
   const outputDir = state.workspaceConfig?.path
@@ -27,11 +28,11 @@ async function presentationNode(state: JapState): Promise<Partial<JapState>> {
     await fs.mkdir(outputDir, { recursive: true });
     await mcpClient.connect(projectRoot);
     await mcpClient.writeArtifactsToDisk(state.artifacts, outputDir);
-    emitLogAdded("SUCCESS", "交付写盘完成", "所有交付文件已写入磁盘。");
+    emitLogAdded("SUCCESS", WORKFLOW_LOG_TEXT.presentDoneTitle, WORKFLOW_LOG_TEXT.presentDoneSummary);
     return { errors: [] };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    emitLogAdded("ERROR", "交付写盘失败", message);
+    emitLogAdded("ERROR", WORKFLOW_LOG_TEXT.presentErrorTitle, message);
     return {
       errors: [...state.errors, `Presentation node failed: ${message}`],
     };

@@ -9,12 +9,18 @@
     :root { --bg:#f5f7fb; --card:#fff; --line:#e4ecf7; --line2:#d6e0f0; --text:#1f2a44; --muted:#7484a0; --blue:#6aa6ff; --green:#2fb267; --red:#e56a6a; }
     * { box-sizing:border-box; }
     body { margin:0; font-family:"Inter","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); }
-    .topbar { height:72px; background:#fff; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; padding:0 20px; }
+    .topbar { min-height:72px; background:#fff; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; padding:10px 20px; gap:16px; }
     .brand { width:44px; height:44px; border-radius:12px; background:#eaf2ff; color:#3f88f7; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:24px; }
     .chip { border:1px solid var(--line2); border-radius:999px; padding:4px 12px; font-size:13px; color:var(--muted); background:#fff; }
     .chip.green { color:#2d9e5d; border-color:#cce8d6; background:#f4fff8; }
     .chip.red { color:#d85555; border-color:#f1c3c3; background:#fff7f7; }
     .gear { width:36px; height:36px; border-radius:10px; border:1px solid var(--line2); background:#fff; color:#60708e; cursor:pointer; }
+    .topbar-left { display:flex; align-items:center; gap:10px; min-width:300px; }
+    .topbar-brand-text { display:grid; gap:2px; }
+    .topbar-title { font-size:26px; font-weight:700; line-height:1.1; }
+    .topbar-sub { font-size:13px; color:#7f8ca5; }
+    .topbar-right { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+    .topbar-task { font-weight:600; color:#4f5f7d; }
     .layout { padding:16px; display:grid; grid-template-columns:360px minmax(760px,1fr) 360px; gap:14px; min-height:calc(100vh - 72px); }
     .panel { background:#fff; border:1px solid var(--line); border-radius:14px; overflow:hidden; min-height:0; }
     .hd { padding:16px; border-bottom:1px solid var(--line); }
@@ -26,9 +32,12 @@
     .field { width:100%; border:1px solid var(--line2); border-radius:10px; padding:10px 12px; font-size:14px; color:var(--text); outline:none; }
     .field:focus { border-color:#7fb2ff; box-shadow:0 0 0 3px #e8f1ff; }
     textarea.field { min-height:120px; resize:vertical; }
-    .btn { border:1px solid transparent; border-radius:10px; padding:9px 12px; font-size:14px; font-weight:600; cursor:pointer; }
+    .btn { border:1px solid transparent; border-radius:10px; padding:9px 12px; font-size:14px; font-weight:600; cursor:pointer; transition:.15s; }
     .btn-primary { background:linear-gradient(180deg,#5fa2ff,#4b8ff2); color:#fff; }
     .btn-light { background:#fff; border-color:var(--line2); color:#4f5f7d; }
+    .btn[disabled] { opacity:.55; cursor:not-allowed; }
+    .action-row { margin-top:8px; display:grid; grid-template-columns:1fr 1.2fr 1fr; gap:8px; }
+    .action-row .btn { width:100%; }
     .state-wrap { border-bottom:1px solid var(--line); padding:10px; overflow:auto; }
     .state-node rect { fill:#fff; stroke:var(--line2); stroke-width:1.2; transition:.2s; }
     .state-node text { fill:#3d4a66; font-size:14px; font-weight:600; }
@@ -50,14 +59,31 @@
     .modal-bd { padding:14px 16px; display:grid; gap:10px; }
     .modal-ft { padding:10px 16px; border-top:1px solid var(--line); display:flex; justify-content:flex-end; gap:10px; }
     .q-option { display:flex; align-items:flex-start; gap:8px; margin:8px 0; font-size:14px; }
+    .history-modal-card { width:min(980px,100%); max-height:calc(100vh - 32px); display:flex; flex-direction:column; }
+    .history-modal-card .modal-bd { flex:1; min-height:0; display:grid; grid-template-rows:auto 1fr; gap:10px; overflow:hidden; padding:10px 12px; }
+    .history-modal-card .modal-ft { padding:10px 12px; }
+    .history-layout { display:grid; grid-template-columns: 260px 1fr; gap:12px; min-height:0; height:100%; }
+    .history-workspace { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center; }
+    .history-list { border:1px solid var(--line); border-radius:10px; overflow:auto; background:#fcfdff; }
+    .history-item { padding:10px; border-bottom:1px solid #edf2fb; cursor:pointer; }
+    .history-item.active { background:#ecf4ff; }
+    .history-meta { font-size:12px; color:#6b7d9a; margin-top:4px; }
+    .history-summary { font-size:12px; color:#4b5f80; margin-top:6px; line-height:1.5; max-height:3em; overflow:hidden; }
+    .history-preview-wrap { border:1px solid var(--line); border-radius:10px; background:#fcfdff; display:grid; grid-template-rows:auto 1fr auto; min-height:0; }
+    .history-tabs { display:flex; gap:8px; padding:10px; border-bottom:1px solid var(--line); }
+    .history-tab { border:1px solid var(--line2); border-radius:999px; padding:4px 10px; font-size:12px; background:#fff; color:#4f5f7d; cursor:pointer; }
+    .history-tab.active { background:#eaf2ff; border-color:#9ec2ff; color:#2f5d9e; }
+    .history-preview { white-space:pre-wrap; overflow:auto; padding:10px; font-size:13px; color:#1f2a44; min-height:0; }
+    .history-empty { font-size:13px; color:#7a89a2; padding:10px; }
+    .history-ft { padding:10px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:10px; }
     @media (max-width:1360px){ .layout{grid-template-columns:360px 1fr;} .right{grid-column:span 2;} }
-    @media (max-width:980px){ .layout{grid-template-columns:1fr;} .right{grid-column:span 1;} .workspace,.log,.scroll{min-height:0;max-height:none;height:auto;} }
+    @media (max-width:980px){ .layout{grid-template-columns:1fr;} .right{grid-column:span 1;} .workspace,.log,.scroll{min-height:0;max-height:none;height:auto;} .topbar{padding:10px 12px;} .topbar-title{font-size:20px;} .topbar-right{justify-content:flex-start;} .action-row{grid-template-columns:1fr;} .history-modal-card{max-height:calc(100vh - 20px);} .history-modal-card .modal-bd{grid-template-rows:auto 1fr;} .history-layout{grid-template-columns:1fr; grid-template-rows:220px 1fr;} .history-workspace{grid-template-columns:1fr;}}
   </style>
 </head>
 <body>
   <header class="topbar">
-    <div class="flex items-center gap-3"><div class="brand">J</div><div><div class="text-[30px] font-bold">J-Architect-Pilot</div><div class="text-[14px] text-[#7f8ca5]">2026 工业级</div></div></div>
-    <div class="flex items-center gap-2"><span id="llmChip" class="chip red">LLM: not configured</span><span id="wsChip" class="chip green">WebSocket: disconnected</span><span class="chip">任务: <span id="currentTaskId">--</span></span><button class="gear" onclick="openSettings()">⚙</button></div>
+    <div class="topbar-left"><div class="brand">J</div><div class="topbar-brand-text"><div class="topbar-title">J-Architect-Pilot</div><div class="topbar-sub">2026 工业级</div></div></div>
+    <div class="topbar-right"><span id="llmChip" class="chip red">LLM: not configured</span><span id="wsChip" class="chip green">WebSocket: disconnected</span><span class="chip topbar-task">任务 #<span id="currentTaskId">--</span></span><span class="chip topbar-task">来源 #<span id="sourceTaskId">--</span></span><button class="gear" onclick="openSettings()">⚙</button></div>
   </header>
 
   <section class="layout">
@@ -66,7 +92,7 @@
       <div class="bd scroll">
         <div class="label">业务目标 *</div>
         <textarea id="businessGoalInput" class="field" placeholder="例如：实现多租户 SaaS 扫码点餐系统，支持门店、订单、支付、权限隔离。"></textarea>
-        <div class="mt-2 flex gap-2"><button class="btn btn-light" onclick="generateQuestionnaire()">1. AI 澄清</button><button class="btn btn-primary" id="designBtn" onclick="startDesignOnly()">2. 生成设计套件</button></div>
+        <div class="action-row"><button class="btn btn-light" onclick="generateQuestionnaire()">1. AI 澄清</button><button class="btn btn-primary" id="designBtn" onclick="startDesignOnly()">2. 生成设计套件</button><button class="btn btn-light" onclick="openHistoryModal()">历史任务</button></div>
 
       </div>
     </aside>
@@ -77,22 +103,22 @@
         <svg viewBox="0 0 1320 220" class="w-full min-w-[900px] h-[200px]">
           <defs><marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#9cb0cc"></polygon></marker></defs>
           <g fill="none" marker-end="url(#arrow)">
-            <path d="M 170 84 L 220 84" class="state-arrow" data-from="IDLE" data-to="INTENT_ANALYSIS"></path>
-            <path d="M 370 84 L 420 84" class="state-arrow" data-from="INTENT_ANALYSIS" data-to="MODELING"></path>
-            <path d="M 570 84 L 620 84" class="state-arrow" data-from="MODELING" data-to="REVIEW"></path>
-            <path d="M 770 84 L 820 84" class="state-arrow" data-from="REVIEW" data-to="DETAILING"></path>
-            <path d="M 970 84 L 1020 84" class="state-arrow" data-from="DETAILING" data-to="PRESENTATION"></path>
-            <path d="M 1170 84 L 1220 84" class="state-arrow" data-from="PRESENTATION" data-to="COMPLETED"></path>
-            <path d="M 705 120 L 705 176 L 505 176 L 505 120" class="state-arrow" data-from="REVIEW" data-to="MODELING"></path>
+            <path d="M 170 84 L 220 84" class="state-arrow" data-from="STANDBY" data-to="DISCOVERY"></path>
+            <path d="M 370 84 L 420 84" class="state-arrow" data-from="DISCOVERY" data-to="SOLUTION_DESIGN"></path>
+            <path d="M 570 84 L 620 84" class="state-arrow" data-from="SOLUTION_DESIGN" data-to="QUALITY_REVIEW"></path>
+            <path d="M 770 84 L 820 84" class="state-arrow" data-from="QUALITY_REVIEW" data-to="IMPLEMENTATION_BLUEPRINT"></path>
+            <path d="M 970 84 L 1020 84" class="state-arrow" data-from="IMPLEMENTATION_BLUEPRINT" data-to="DELIVERY_RELEASE"></path>
+            <path d="M 1170 84 L 1220 84" class="state-arrow" data-from="DELIVERY_RELEASE" data-to="DONE"></path>
+            <path d="M 705 120 L 705 176 L 505 176 L 505 120" class="state-arrow" data-from="QUALITY_REVIEW" data-to="SOLUTION_DESIGN"></path>
           </g>
-          <g class="state-node" data-state="IDLE" transform="translate(20,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">空闲</text></g>
-          <g class="state-node" data-state="INTENT_ANALYSIS" transform="translate(220,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">意图分析</text></g>
-          <g class="state-node" data-state="MODELING" transform="translate(420,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">建模</text></g>
-          <g class="state-node" data-state="REVIEW" transform="translate(620,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">审查</text></g>
-          <g class="state-node" data-state="DETAILING" transform="translate(820,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">细化</text></g>
-          <g class="state-node" data-state="PRESENTATION" transform="translate(1020,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">交付</text></g>
-          <g class="state-node" data-state="COMPLETED" transform="translate(1220,48)"><rect width="120" height="72" rx="10"></rect><text x="60" y="42" text-anchor="middle">完成</text></g>
-          <g class="state-node" data-state="FAILED" transform="translate(1220,146)"><rect width="120" height="60" rx="10"></rect><text x="60" y="36" text-anchor="middle">失败</text></g>
+          <g class="state-node" data-state="STANDBY" transform="translate(20,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">待命</text></g>
+          <g class="state-node" data-state="DISCOVERY" transform="translate(220,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">需求澄清</text></g>
+          <g class="state-node" data-state="SOLUTION_DESIGN" transform="translate(420,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">方案建模</text></g>
+          <g class="state-node" data-state="QUALITY_REVIEW" transform="translate(620,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">质量审阅</text></g>
+          <g class="state-node" data-state="IMPLEMENTATION_BLUEPRINT" transform="translate(820,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">实施蓝图</text></g>
+          <g class="state-node" data-state="DELIVERY_RELEASE" transform="translate(1020,48)"><rect width="150" height="72" rx="10"></rect><text x="75" y="42" text-anchor="middle">交付发布</text></g>
+          <g class="state-node" data-state="DONE" transform="translate(1220,48)"><rect width="120" height="72" rx="10"></rect><text x="60" y="42" text-anchor="middle">已完成</text></g>
+          <g class="state-node" data-state="ERROR" transform="translate(1220,146)"><rect width="120" height="60" rx="10"></rect><text x="60" y="36" text-anchor="middle">异常</text></g>
         </svg>
       </div>
       <div class="console-hd"><div style="font-size:14px;font-weight:600;">思考日志</div><button class="btn btn-light" style="padding:6px 10px;font-size:13px;" onclick="clearConsole()">清空</button></div>
@@ -114,12 +140,13 @@
 
   <div id="questionnaireModal" class="modal"><div class="modal-card"><div class="modal-hd">需求澄清问卷</div><div class="modal-bd"><div id="questionProgress" style="font-size:13px;color:var(--muted);"></div><div id="questionTitle" style="font-size:16px;font-weight:600;"></div><div id="questionDimension" style="font-size:13px;color:#4f719f;"></div><div id="questionType" style="font-size:12px;color:#5a7aa7;"></div><div id="questionOptions"></div></div><div class="modal-ft"><button class="btn btn-light" id="prevQuestionBtn" onclick="prevQuestion()">上一题</button><button class="btn btn-light" id="nextQuestionBtn" onclick="nextQuestion()">下一题</button><button class="btn btn-primary" id="finishQuestionBtn" onclick="finishQuestionnaire()">完成问卷</button></div></div></div>
   <div id="finalizeModal" class="modal"><div class="modal-card"><div class="modal-hd">需求定稿确认</div><div class="modal-bd"><div style="font-size:13px;color:var(--muted);">系统已基于当前问卷与答案自动生成定稿。你可以直接修改后确认。</div><textarea id="finalRequirementEditor" class="field" style="min-height:280px;"></textarea></div><div class="modal-ft"><button class="btn btn-light" onclick="regenerateFinalRequirement()">重新生成</button><button class="btn btn-light" onclick="closeFinalizeModal()">取消</button><button class="btn btn-primary" onclick="confirmFinalRequirement()">确认并继续</button></div></div></div>
+  <div id="historyModal" class="modal"><div class="modal-card history-modal-card"><div class="modal-hd">历史需求任务</div><div class="modal-bd"><div class="history-workspace"><input id="historyWorkspacePath" class="field" placeholder="选择包含 tasks/_draft 的目录" /><button class="btn btn-light" onclick="chooseHistoryWorkspaceFolder()">选择目录</button><button class="btn btn-light" onclick="loadHistoryList()">刷新</button></div><div class="history-layout"><div id="historyList" class="history-list"></div><div class="history-preview-wrap"><div id="historyTabs" class="history-tabs"></div><div id="historyPreview" class="history-preview"></div><div class="history-ft"><div id="historySelectionInfo" style="font-size:13px;color:var(--muted);">未选择历史任务</div><button id="historyContinueBtn" class="btn btn-primary" onclick="continueFromHistory()" disabled>基于此任务继续生成</button></div></div></div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeHistoryModal()">关闭</button></div></div></div>
   <script>
     const API_BASE = "";
     const SESSION_LLM_CONFIG_KEY = "jap.llm.session.config";
     const LOCAL_WORKSPACE_PATH_KEY = "jap.workspace.path";
     const SESSION_ELICITATION_MODE_KEY = "jap.elicitation.mode";
-    const STATE_ORDER = ["IDLE","INTENT_ANALYSIS","MODELING","REVIEW","DETAILING","PRESENTATION","COMPLETED","FAILED"];
+    const STATE_ORDER = ["STANDBY","DISCOVERY","SOLUTION_DESIGN","QUALITY_REVIEW","IMPLEMENTATION_BLUEPRINT","DELIVERY_RELEASE","DONE","ERROR"];
     let ws = null;
     let wsReconnectTimer = null;
     let currentTaskId = null;
@@ -141,6 +168,11 @@
     let lastFinalizedFingerprint = "";
     let lastFinalizedAt = 0;
     let finalizeModalOpen = false;
+    let designSubmitting = false;
+    let historyRecords = [];
+    let selectedHistory = null;
+    let selectedHistoryDetail = null;
+    let selectedHistoryPreviewKey = "final";
 
     function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
     function normalizeAnswersForApi(){
@@ -165,6 +197,26 @@
       const list = [];
       clarificationRounds.forEach((r)=>{ (r.questions||[]).forEach((q)=>list.push(q)); });
       return list;
+    }
+    function hasAvailableLlmConfig(){
+      const key = (document.getElementById("llmApiKey").value||"").trim();
+      if(key) return true;
+      const cached=getSessionLlmConfig();
+      return Boolean((cached?.apiKey||"").trim());
+    }
+    function canStartDesign(){
+      const baseRequirement = (finalizedRequirement||"").trim() || (document.getElementById("businessGoalInput").value||"").trim();
+      return Boolean(baseRequirement) && !finalizeInProgress && !finalizeModalOpen && !designSubmitting && hasAvailableLlmConfig();
+    }
+    function refreshDesignButtonState(){
+      const btn = document.getElementById("designBtn");
+      const enabled = canStartDesign();
+      btn.disabled = !enabled;
+      btn.className = `btn ${enabled ? "btn-primary" : "btn-light"}`;
+    }
+    function setTaskIdentity(taskId, sourceId){
+      document.getElementById("currentTaskId").textContent = taskId || "--";
+      document.getElementById("sourceTaskId").textContent = sourceId || "--";
     }
 
     function openSettings(){ 
@@ -207,18 +259,18 @@
     function esc(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll("\"","&quot;").replaceAll("'","&#39;"); }
     function addLog(tag,msg,level="info"){ const root=document.getElementById("logContainer"); const color=level==="success"?"#2c9a58":level==="error"?"#d35a68":"#5673a0"; const line=document.createElement("div"); line.className="log-line"; line.innerHTML=`<span style="color:#7f8ca5;margin-right:8px;">[${new Date().toLocaleTimeString()}]</span><span style="color:${color};font-weight:700;">${esc(tag)}</span> ${esc(msg)}`; root.appendChild(line); root.scrollTop=root.scrollHeight; }
 
-    function updateWorkspaceProgress(stage){ const idx=Math.max(0,STATE_ORDER.indexOf(stage)); const pct=Math.round((idx/(STATE_ORDER.length-2))*100); const v=stage==="FAILED"?100:Math.min(100,Math.max(0,pct)); document.getElementById("workspaceProgressBar").style.width=`${v}%`; document.getElementById("workspaceProgressText").textContent=`${v}%`; document.getElementById("workspaceStage").textContent=stage; }
+    function updateWorkspaceProgress(stage){ const idx=Math.max(0,STATE_ORDER.indexOf(stage)); const pct=Math.round((idx/(STATE_ORDER.length-2))*100); const v=stage==="ERROR"?100:Math.min(100,Math.max(0,pct)); document.getElementById("workspaceProgressBar").style.width=`${v}%`; document.getElementById("workspaceProgressText").textContent=`${v}%`; document.getElementById("workspaceStage").textContent=stage; }
 
     function activateState(stateName){
-      const target=STATE_ORDER.includes(stateName)?stateName:"IDLE"; const idx=STATE_ORDER.indexOf(target);
-      document.querySelectorAll(".state-node").forEach((node)=>{ const s=node.dataset.state; const rect=node.querySelector("rect"); if(!s||!rect) return; const sIdx=STATE_ORDER.indexOf(s); const active=s===target; const done=sIdx>-1&&sIdx<idx&&s!=="FAILED"; if(target==="FAILED"&&s==="FAILED"){ rect.setAttribute("fill","#ffecef"); rect.setAttribute("stroke","#ef9ca8"); rect.setAttribute("stroke-width","2"); } else if(active){ rect.setAttribute("fill","#ebf3ff"); rect.setAttribute("stroke","#6aa6ff"); rect.setAttribute("stroke-width","2"); } else if(done){ rect.setAttribute("fill","#ecfbf1"); rect.setAttribute("stroke","#79c79a"); rect.setAttribute("stroke-width","1.5"); } else { rect.setAttribute("fill","#fff"); rect.setAttribute("stroke","#d7e2f3"); rect.setAttribute("stroke-width","1.2"); } });
-      document.querySelectorAll(".state-arrow").forEach((arrow)=>{ const from=arrow.dataset.from, to=arrow.dataset.to; const f=STATE_ORDER.indexOf(from), t=STATE_ORDER.indexOf(to); const activePath=f>-1&&t>-1&&t<=idx&&target!=="FAILED"; const retryPath=target==="MODELING"&&from==="REVIEW"&&to==="MODELING"; arrow.setAttribute("stroke", activePath||retryPath?"#6aa6ff":"#9cb0cc"); });
+      const target=STATE_ORDER.includes(stateName)?stateName:"STANDBY"; const idx=STATE_ORDER.indexOf(target);
+      document.querySelectorAll(".state-node").forEach((node)=>{ const s=node.dataset.state; const rect=node.querySelector("rect"); if(!s||!rect) return; const sIdx=STATE_ORDER.indexOf(s); const active=s===target; const done=sIdx>-1&&sIdx<idx&&s!=="ERROR"; if(target==="ERROR"&&s==="ERROR"){ rect.setAttribute("fill","#ffecef"); rect.setAttribute("stroke","#ef9ca8"); rect.setAttribute("stroke-width","2"); } else if(active){ rect.setAttribute("fill","#ebf3ff"); rect.setAttribute("stroke","#6aa6ff"); rect.setAttribute("stroke-width","2"); } else if(done){ rect.setAttribute("fill","#ecfbf1"); rect.setAttribute("stroke","#79c79a"); rect.setAttribute("stroke-width","1.5"); } else { rect.setAttribute("fill","#fff"); rect.setAttribute("stroke","#d7e2f3"); rect.setAttribute("stroke-width","1.2"); } });
+      document.querySelectorAll(".state-arrow").forEach((arrow)=>{ const from=arrow.dataset.from, to=arrow.dataset.to; const f=STATE_ORDER.indexOf(from), t=STATE_ORDER.indexOf(to); const activePath=f>-1&&t>-1&&t<=idx&&target!=="ERROR"; const retryPath=target==="SOLUTION_DESIGN"&&from==="QUALITY_REVIEW"&&to==="SOLUTION_DESIGN"; arrow.setAttribute("stroke", activePath||retryPath?"#6aa6ff":"#9cb0cc"); });
       updateWorkspaceProgress(target);
     }
 
     function updateFileTree(files){ const tree=document.getElementById("fileTree"), preview=document.getElementById("filePreview"), count=document.getElementById("artifactCount"); if(!Array.isArray(files)||files.length===0){ tree.textContent="暂无生成文件"; preview.textContent="// 文件内容将在此显示..."; count.textContent="0 个"; document.getElementById("previewName").textContent="--"; return; } count.textContent=`${files.length} 个`; tree.innerHTML=files.map(f=>`<div style="padding:6px 4px;border-bottom:1px dashed #e8eef9;">${esc(f)}</div>`).join(""); document.getElementById("previewName").textContent=files[0]; preview.textContent=`// 已生成文件:\n${files.join("\n")}`; }
 
-    function handleEvent(event){ if(event.type==="STAGE_CHANGED"){ const from=event?.data?.from||"-", to=event?.data?.to||"IDLE"; activateState(to); addLog("状态",`${from} -> ${to}`); return; } if(event.type==="LOG_ADDED"){ const d=event.data||{}; const lv=d.logType==="ERROR"?"error":d.logType==="SUCCESS"?"success":"info"; addLog(d.logType||"INFO",`${d.title||""} ${d.summary||""}`.trim(),lv); return; } if(event.type==="TASK_FINISHED"){ const status=event?.data?.status==="COMPLETED"?"COMPLETED":"FAILED"; activateState(status); updateFileTree(Array.isArray(event?.data?.artifacts)?event.data.artifacts:[]); addLog("结果",status==="COMPLETED"?"任务完成":"任务失败",status==="COMPLETED"?"success":"error"); } }
+    function handleEvent(event){ if(event.type==="STAGE_CHANGED"){ const from=event?.data?.from||"-", to=event?.data?.to||"STANDBY"; activateState(to); addLog("状态",`${from} -> ${to}`); return; } if(event.type==="LOG_ADDED"){ const d=event.data||{}; const lv=d.logType==="ERROR"?"error":d.logType==="SUCCESS"?"success":"info"; addLog(d.logType||"INFO",`${d.title||""} ${d.summary||""}`.trim(),lv); return; } if(event.type==="TASK_FINISHED"){ const status=event?.data?.status==="DONE"?"DONE":"ERROR"; activateState(status); updateFileTree(Array.isArray(event?.data?.artifacts)?event.data.artifacts:[]); addLog("结果",status==="DONE"?"任务完成":"任务失败",status==="DONE"?"success":"error"); } }
 
     function buildTaskLlmConfig(){ const baseUrl=(document.getElementById("llmBaseUrl").value||"").trim(); const apiKey=(document.getElementById("llmApiKey").value||"").trim(); const modelName=(document.getElementById("llmModelName").value||"").trim(); const cached=getSessionLlmConfig(); const cfg={ baseUrl:baseUrl||cached?.baseUrl||"https://api.deepseek.com", apiKey:apiKey||cached?.apiKey||"", modelName:modelName||cached?.modelName||"deepseek-chat" }; if(!cfg.apiKey) return null; setSessionLlmConfig(cfg); return cfg; }
 
@@ -436,10 +488,182 @@
       finalizeModalOpen = true;
       document.getElementById("finalRequirementEditor").value = content || "";
       document.getElementById("finalizeModal").classList.add("show");
+      refreshDesignButtonState();
     }
     function closeFinalizeModal(){
       finalizeModalOpen = false;
       document.getElementById("finalizeModal").classList.remove("show");
+      refreshDesignButtonState();
+    }
+    function getActiveWorkspacePath(){
+      const p=(document.getElementById("workspacePath").value||"").trim();
+      if(p) return p;
+      return getWorkspacePathConfig()?.path || "";
+    }
+    function getHistoryWorkspacePath(){
+      const modalPath = (document.getElementById("historyWorkspacePath").value||"").trim();
+      if(modalPath) return modalPath;
+      return getActiveWorkspacePath();
+    }
+    async function chooseHistoryWorkspaceFolder(){
+      try{
+        const resp=await fetch(API_BASE+"/api/v1/config/workspace/choose",{method:"POST"});
+        const data=await resp.json();
+        if(!resp.ok||!data?.path){ addLog("错误",data?.message||"未选择目录","error"); return; }
+        document.getElementById("historyWorkspacePath").value = data.path;
+        await loadHistoryList();
+      }catch(error){
+        addLog("错误",String(error?.message||error),"error");
+      }
+    }
+    function openHistoryModal(){
+      const currentPath = getActiveWorkspacePath();
+      if(currentPath){
+        document.getElementById("historyWorkspacePath").value = currentPath;
+      }
+      document.getElementById("historyModal").classList.add("show");
+      void loadHistoryList();
+    }
+    function closeHistoryModal(){
+      document.getElementById("historyModal").classList.remove("show");
+    }
+    function renderHistoryList(){
+      const container=document.getElementById("historyList");
+      if(!Array.isArray(historyRecords) || historyRecords.length===0){
+        container.innerHTML='<div class="history-empty">未找到历史任务</div>';
+        return;
+      }
+      container.innerHTML=historyRecords.map((item)=>{
+        const active = selectedHistory && selectedHistory.id===item.id && selectedHistory.type===item.type;
+        const typeText = item.type==="draft" ? "draft" : "task";
+        const disabledText = item.requirementAvailable ? "" : " · 缺少需求文件";
+        return `<div class="history-item ${active?"active":""}" onclick="selectHistory('${esc(item.id)}','${esc(item.type)}')"><div style="font-size:13px;font-weight:600;color:#2f4061;">${esc(item.id)}</div><div class="history-meta">${typeText} · ${new Date(item.createdAt).toLocaleString()}${disabledText}</div><div class="history-summary">${esc(item.summary||"(无摘要)")}</div></div>`;
+      }).join("");
+    }
+    function renderHistoryTabs(){
+      const tabs = ["final","normalized","raw"];
+      document.getElementById("historyTabs").innerHTML = tabs.map((key)=>{
+        const active = selectedHistoryPreviewKey===key ? "active" : "";
+        return `<button class="history-tab ${active}" onclick="switchHistoryPreview('${key}')">${key}</button>`;
+      }).join("");
+    }
+    function switchHistoryPreview(key){
+      selectedHistoryPreviewKey = key;
+      renderHistoryTabs();
+      renderHistoryPreview();
+    }
+    function renderHistoryPreview(){
+      const previewEl=document.getElementById("historyPreview");
+      const infoEl=document.getElementById("historySelectionInfo");
+      const continueBtn=document.getElementById("historyContinueBtn");
+      if(!selectedHistoryDetail){
+        previewEl.textContent = "请选择左侧历史任务";
+        infoEl.textContent = "未选择历史任务";
+        continueBtn.disabled = true;
+        return;
+      }
+      const previews = selectedHistoryDetail.previews || {};
+      const current = previews[selectedHistoryPreviewKey] || {};
+      const content = current.exists ? (current.content || "") : "该文件不存在";
+      const truncated = current.truncated ? "\n\n[预览已截断]" : "";
+      previewEl.textContent = content + truncated;
+      const src = selectedHistoryDetail.id || "--";
+      const req = selectedHistoryDetail.requirement || {};
+      infoEl.textContent = `来源任务ID: ${src} | 需求源: ${req.source || "--"} | 工作目录: ${getHistoryWorkspacePath() || "--"}`;
+      continueBtn.disabled = !req.available;
+    }
+    async function loadHistoryList(){
+      const workspacePath = getHistoryWorkspacePath();
+      const queryParts = [];
+      if(workspacePath) queryParts.push(`workspacePath=${encodeURIComponent(workspacePath)}`);
+      queryParts.push(`_ts=${Date.now()}`);
+      const query = `?${queryParts.join("&")}`;
+      try{
+        const resp=await fetch(API_BASE+`/api/v1/history/requirements${query}`,{ cache:"no-store" });
+        const data=await resp.json();
+        if(!resp.ok){
+          historyRecords = [];
+          selectedHistory = null;
+          selectedHistoryDetail = null;
+          renderHistoryList();
+          renderHistoryTabs();
+          renderHistoryPreview();
+          addLog("错误",data?.message||"读取历史任务失败","error");
+          return;
+        }
+        if(data?.workspacePath){
+          document.getElementById("historyWorkspacePath").value = data.workspacePath;
+        }
+        historyRecords = Array.isArray(data?.items)
+          ? data.items.filter((item)=>item?.requirementAvailable)
+          : [];
+        selectedHistory = null;
+        selectedHistoryDetail = null;
+        selectedHistoryPreviewKey = "final";
+        renderHistoryList();
+        renderHistoryTabs();
+        renderHistoryPreview();
+      }catch(error){
+        addLog("错误",String(error?.message||error),"error");
+      }
+    }
+    async function selectHistory(id,type){
+      selectedHistory = { id, type };
+      renderHistoryList();
+      const workspacePath = getHistoryWorkspacePath();
+      const queryParts = [];
+      if(type) queryParts.push(`type=${encodeURIComponent(type)}`);
+      if(workspacePath) queryParts.push(`workspacePath=${encodeURIComponent(workspacePath)}`);
+      queryParts.push(`_ts=${Date.now()}`);
+      const query = queryParts.length>0 ? `?${queryParts.join("&")}` : "";
+      try{
+        const resp=await fetch(API_BASE+`/api/v1/history/requirements/${encodeURIComponent(id)}${query}`,{ cache:"no-store" });
+        const data=await resp.json();
+        if(!resp.ok){ addLog("错误",data?.message||"读取历史详情失败","error"); return; }
+        selectedHistoryDetail = data;
+        const reqSource = data?.requirement?.source || "final";
+        selectedHistoryPreviewKey = reqSource;
+        renderHistoryTabs();
+        renderHistoryPreview();
+      }catch(error){
+        addLog("错误",String(error?.message||error),"error");
+      }
+    }
+    async function continueFromHistory(){
+      if(!selectedHistoryDetail || !selectedHistoryDetail.requirement?.available){
+        addLog("错误","历史任务缺少可用需求文件，无法继续生成","error");
+        return;
+      }
+      const llm=buildTaskLlmConfig();
+      if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
+      const workspacePath = getHistoryWorkspacePath();
+      const workspace = workspacePath ? { path: workspacePath } : (getWorkspacePathConfig()||{});
+      try{
+        const resp=await fetch(API_BASE+"/api/v1/tasks/design-from-history",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            historyId:selectedHistoryDetail.id,
+            historyType:selectedHistoryDetail.type,
+            llm,
+            workspace
+          })
+        });
+        const data=await resp.json();
+        if(!resp.ok){ addLog("错误",data?.message||"从历史任务继续生成失败","error"); return; }
+        currentTaskId=data.taskId;
+        setTaskIdentity(currentTaskId, data.sourceHistoryId || selectedHistoryDetail.id || "--");
+        document.getElementById("workspaceStatus").textContent=`当前目录：${data.outputDir || workspacePath || "output"}`;
+        document.getElementById("workspacePathLabel").textContent=data.outputDir || workspacePath || "output";
+        activateState("DISCOVERY");
+        updateFileTree([]);
+        connectWebSocketForTask(currentTaskId);
+        addLog("系统",`新任务ID：${data.taskId}，来源任务ID：${data.sourceHistoryId || selectedHistoryDetail.id}`,"success");
+        closeHistoryModal();
+        refreshDesignButtonState();
+      }catch(error){
+        addLog("错误",String(error?.message||error),"error");
+      }
     }
 
     function renderCurrentQuestion(){
@@ -476,6 +700,8 @@
       if(type==="multiple" && !Array.isArray(answers[q.id])){ answers[q.id]=[]; }
       const selectedSingle = typeof answers[q.id] === "string" ? answers[q.id] : q.options[0];
       const selectedMulti = Array.isArray(answers[q.id]) ? answers[q.id] : [];
+      const customSingleValue = type==="single" && typeof answers[q.id] === "string" && !q.options.includes(answers[q.id]) ? answers[q.id] : "";
+      const customMultiValues = type==="multiple" ? selectedMulti.filter((v)=>!q.options.includes(v)) : [];
       const optionsHtml=q.options.map((opt)=>{
         const escapedQid = q.id.replace(/'/g,"\\'");
         const escapedOpt = opt.replace(/'/g,"\\'");
@@ -484,7 +710,22 @@
         }
         return `<label class="q-option"><input type="radio" name="modal_q_${q.id}" value="${esc(opt)}" ${selectedSingle===opt?"checked":""} onchange="setModalAnswer('${escapedQid}','${escapedOpt}')"/> <span>${esc(opt)}</span></label>`;
       }).join("");
-      document.getElementById("questionOptions").innerHTML=optionsHtml;
+      const escapedQid = q.id.replace(/'/g,"\\'");
+      const customListHtml = customMultiValues.map((item)=>{
+        const escapedItem = String(item).replace(/'/g,"\\'");
+        return `<div style="display:flex;align-items:center;gap:8px;margin-top:6px;"><span style="font-size:12px;padding:2px 8px;border:1px solid var(--line2);border-radius:999px;color:#4f5f7d;background:#f8fbff;">${esc(item)}</span><button class="btn btn-light" style="padding:4px 8px;font-size:12px;" onclick="removeCustomAnswer('${escapedQid}','${escapedItem}')">移除</button></div>`;
+      }).join("");
+      const customAnswerHtml = `
+        <div style="margin-top:10px;border-top:1px dashed var(--line2);padding-top:10px;">
+          <div style="font-size:13px;color:#5f6f8e;margin-bottom:6px;">自定义输入（不使用 AI 提供选项时可填写）</div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="customInput_${q.id}" class="field" style="padding:8px 10px;" placeholder="请输入自定义答案" value="${esc(customSingleValue)}" />
+            <button class="btn btn-light" onclick="applyCustomAnswer('${escapedQid}','${type}')">${type==="multiple"?"添加":"使用"}</button>
+          </div>
+          ${customListHtml}
+        </div>
+      `;
+      document.getElementById("questionOptions").innerHTML=optionsHtml + customAnswerHtml;
       document.getElementById("prevQuestionBtn").style.display="inline-block";
       document.getElementById("prevQuestionBtn").disabled=questionIndex===0;
       const isLast=questionIndex===qs.length-1;
@@ -546,6 +787,30 @@
       else next.delete(opt);
       answers[qid]=Array.from(next);
       scheduleBackgroundFinalize("multiple");
+    }
+    function applyCustomAnswer(qid,type){
+      const input=document.getElementById(`customInput_${qid}`);
+      const value=(input?.value||"").trim();
+      if(!value){ addLog("系统","请输入自定义答案后再提交。"); return; }
+      if(type==="multiple"){
+        if(!Array.isArray(answers[qid])) answers[qid]=[];
+        const next = new Set(answers[qid]);
+        next.add(value);
+        answers[qid]=Array.from(next);
+        input.value="";
+        scheduleBackgroundFinalize("custom-multiple");
+        renderCurrentQuestion();
+        return;
+      }
+      answers[qid]=value;
+      scheduleBackgroundFinalize("custom-single");
+      renderCurrentQuestion();
+    }
+    function removeCustomAnswer(qid,value){
+      if(!Array.isArray(answers[qid])) return;
+      answers[qid]=answers[qid].filter((item)=>item!==value);
+      scheduleBackgroundFinalize("custom-remove");
+      renderCurrentQuestion();
     }
     function prevQuestion(){ if(questionIndex>0){ questionIndex--; renderCurrentQuestion(); } }
     function nextQuestion(){
@@ -624,6 +889,7 @@
         lastFinalizedFingerprint = buildAnswersFingerprint();
         lastFinalizedAt = Date.now();
         addLog("系统","定稿已重新生成。","success");
+        refreshDesignButtonState();
       }catch(error){
         addLog("错误",String(error?.message||error),"error");
       }
@@ -636,6 +902,7 @@
       lastFinalizedAt = Date.now();
       closeFinalizeModal();
       addLog("系统","定稿已确认，可直接启动设计生成。","success");
+      refreshDesignButtonState();
     }
 
     async function finishQuestionnaire(){
@@ -658,6 +925,7 @@
         return;
       }
       finalizeInProgress = true;
+      refreshDesignButtonState();
       addLog("系统","正在补齐最后一次定稿同步...");
       try{
         if(backgroundFinalizeRunning){
@@ -677,6 +945,7 @@
         addLog("错误",String(error?.message||error),"error");
       }finally{
         finalizeInProgress = false;
+        refreshDesignButtonState();
       }
     }
 
@@ -689,7 +958,8 @@
       const llm=buildTaskLlmConfig(); if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
       const workspace=workspacePath ? { path:workspacePath } : (getWorkspacePathConfig()||{});
-      document.getElementById("designBtn").disabled=true;
+      designSubmitting = true;
+      refreshDesignButtonState();
       addLog("系统","正在提交设计任务...");
       try{
         const resp=await fetch(API_BASE+"/api/v1/tasks/design-only",{
@@ -706,13 +976,13 @@
         const data=await resp.json();
         if(!resp.ok){ addLog("错误",data?.message||"任务提交失败","error"); return; }
         currentTaskId=data.taskId;
-        document.getElementById("currentTaskId").textContent=currentTaskId;
-        activateState("INTENT_ANALYSIS");
+        setTaskIdentity(currentTaskId, "--");
+        activateState("DISCOVERY");
         updateFileTree([]);
         connectWebSocketForTask(currentTaskId);
         addLog("系统",`任务创建成功：${currentTaskId}`,"success");
       }catch(error){ addLog("错误",String(error?.message||error),"error"); }
-      finally { document.getElementById("designBtn").disabled=false; }
+      finally { designSubmitting = false; refreshDesignButtonState(); }
     }
 
     async function loadSettings(){
@@ -723,9 +993,21 @@
       updateLlmChip(Boolean(llm&&llm.apiKey));
       const w=getWorkspacePathConfig(); if(w?.path){ document.getElementById("workspacePath").value=w.path; }
       validateWorkspace();
+      refreshDesignButtonState();
     }
 
-    document.addEventListener("DOMContentLoaded",()=>{ loadSettings(); connectWebSocket(null); activateState("IDLE"); addLog("系统","界面已就绪：先点 AI 澄清，再生成设计套件"); });
+    document.addEventListener("DOMContentLoaded",()=>{
+      document.getElementById("businessGoalInput").addEventListener("input", refreshDesignButtonState);
+      document.getElementById("llmApiKey").addEventListener("input", refreshDesignButtonState);
+      document.getElementById("llmBaseUrl").addEventListener("input", refreshDesignButtonState);
+      document.getElementById("llmModelName").addEventListener("input", refreshDesignButtonState);
+      loadSettings();
+      setTaskIdentity("--","--");
+      connectWebSocket(null);
+      activateState("STANDBY");
+      refreshDesignButtonState();
+      addLog("系统","界面已就绪：先点 AI 澄清，再生成设计套件");
+    });
   </script>
 </body>
 </html>

@@ -6,7 +6,7 @@ type BroadcastPayload = {
 type Broadcaster = (payload: BroadcastPayload) => void;
 
 let broadcaster: Broadcaster | null = null;
-let currentStage = "IDLE";
+let currentStage = "STANDBY";
 let currentTaskId: string | null = null;
 
 function emit(type: string, data: Record<string, unknown>): void {
@@ -29,12 +29,12 @@ export function setBroadcaster(fn: Broadcaster): void {
 
 export function beginTask(taskId: string): void {
   currentTaskId = taskId;
-  currentStage = "IDLE";
+  currentStage = "STANDBY";
 }
 
 export function endTask(): void {
   currentTaskId = null;
-  currentStage = "IDLE";
+  currentStage = "STANDBY";
 }
 
 export function emitStageChanged(to: string): void {
@@ -52,7 +52,7 @@ export function emitLogAdded(
 }
 
 export function emitTaskFinished(
-  status: "COMPLETED" | "FAILED",
+  status: "DONE" | "ERROR",
   extras: Record<string, unknown> = {},
 ): void {
   emit("TASK_FINISHED", { status, ...extras });

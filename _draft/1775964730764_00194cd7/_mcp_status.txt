@@ -1,0 +1,6 @@
+prdMcpAvailable: true
+prdMcpAttempted: true
+prdDraftToolName: generate_prd
+reason: 已通过工具 generate_prd 生成 PRD 草案
+hint: PRD MCP 状态正常或已回退本地定稿。
+availableTools: read_file, read_text_file, read_media_file, read_multiple_files, write_file, edit_file, create_directory, list_directory, list_directory_with_sizes, directory_tree, move_file, search_files, get_file_info, list_allowed_directories, sequentialthinking, generate_prd, validate_prd, list_validation_rules, list_ai_providers, create_template, list_templates, get_template, update_template, delete_template, export_templates, import_templates, list_all_rules, add_validation_rule, update_validation_rule, delete_validation_rule, stats, get_provider_config, update_provider_config, render_template, health_check, get_logs

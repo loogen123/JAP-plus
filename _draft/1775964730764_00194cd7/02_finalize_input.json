@@ -1,0 +1,70 @@
+{
+  "originalRequirement": "做一个多租户SaaS点餐系统",
+  "questionnaire": {
+    "questions": []
+  },
+  "answers": {},
+  "projectContext": "--- package.json ---\n{\n  \"name\": \"jap-plus\",\n  \"version\": \"1.0.0\",\n  \"description\": \"\",\n  \"main\": \"index.js\",\n  \"scripts\": {\n    \"dev\": \"tsx src/server.ts\"\n  },\n  \"keywords\": [],\n  \"author\": \"\",\n  \"license\": \"ISC\",\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"@langchain/core\": \"^1.1.39\",\n    \"@langchain/langgraph\": \"^1.2.8\",\n    \"@langchain/openai\": \"^1.4.3\",\n    \"@modelcontextprotocol/sdk\": \"^1.29.0\",\n    \"cors\": \"^2.8.6\",\n    \"dotenv\": \"^17.4.1\",\n    \"express\": \"^5.2.1\",\n    \"prd-creator-mcp\": \"^0.1.1\",\n    \"ws\": \"^8.20.0\",\n    \"zod\": \"^4.3.6\"\n  },\n  \"devDependencies\": {\n    \"@types/cors\": \"^2.8.19\",\n    \"@types/express\": \"^5.0.6\",\n    \"@types/node\": \"^25.6.0\",\n    \"@types/ws\": \"^8.18.1\",\n    \"tsx\": \"^4.21.0\",\n    \"typescript\": \"^6.0.2\"\n  }\n}\n\n\n--- .jap-skills.md ---\n# JAP Skills\n\n## 需求澄清技能\n- 问题必须可执行，禁止泛化问题\n- 优先补齐边界条件与异常路径\n- 先问不可逆决策，再问可延后决策\n- 与已有问题语义去重，禁止同义改写重复提问\n- 每批问题保持高信息密度，避免低价值追问\n\n## 建模技能\n- 领域模型字段命名保持一致，实体关系必须闭合\n- 状态机必须覆盖主路径与失败路径\n- OpenAPI 字段必须可映射到领域模型\n\n## 细化交付技能\n- 验收测试必须可直接执行\n- UI 原型必须与状态机和实体保持一致\n- API 调试集合必须覆盖契约中的关键接口\n\n\n\n\n[SkillRules]\n# JAP Skills\n\n## 需求澄清技能\n- 问题必须可执行，禁止泛化问题\n- 优先补齐边界条件与异常路径\n- 先问不可逆决策，再问可延后决策\n- 与已有问题语义去重，禁止同义改写重复提问\n- 每批问题保持高信息密度，避免低价值追问\n\n## 建模技能\n- 领域模型字段命名保持一致，实体关系必须闭合\n- 状态机必须覆盖主路径与失败路径\n- OpenAPI 字段必须可映射到领域模型\n\n## 细化交付技能\n- 验收测试必须可直接执行\n- UI 原型必须与状态机和实体保持一致\n- API 调试集合必须覆盖契约中的关键接口\n[/SkillRules]",
+  "skillContext": "\n[SkillRules]\n# JAP Skills\n\n## 需求澄清技能\n- 问题必须可执行，禁止泛化问题\n- 优先补齐边界条件与异常路径\n- 先问不可逆决策，再问可延后决策\n- 与已有问题语义去重，禁止同义改写重复提问\n- 每批问题保持高信息密度，避免低价值追问\n\n## 建模技能\n- 领域模型字段命名保持一致，实体关系必须闭合\n- 状态机必须覆盖主路径与失败路径\n- OpenAPI 字段必须可映射到领域模型\n\n## 细化交付技能\n- 验收测试必须可直接执行\n- UI 原型必须与状态机和实体保持一致\n- API 调试集合必须覆盖契约中的关键接口\n[/SkillRules]\n",
+  "prdMcpAvailable": true,
+  "prdMcpAttempted": true,
+  "prdMcpReason": "已通过工具 generate_prd 生成 PRD 草案",
+  "prdMcpDiagnosis": {
+    "candidateTools": [
+      "generate_prd",
+      "create_prd",
+      "build_prd",
+      "enhance_prd_content"
+    ],
+    "matchedTools": [
+      "generate_prd"
+    ],
+    "hasMatchedTool": true,
+    "likelyNotInstalled": false,
+    "likelyNetworkOrRegistry": false,
+    "likelyRuntimeFailure": false,
+    "hint": "PRD MCP 状态正常或已回退本地定稿。"
+  },
+  "availableTools": [
+    "read_file",
+    "read_text_file",
+    "read_media_file",
+    "read_multiple_files",
+    "write_file",
+    "edit_file",
+    "create_directory",
+    "list_directory",
+    "list_directory_with_sizes",
+    "directory_tree",
+    "move_file",
+    "search_files",
+    "get_file_info",
+    "list_allowed_directories",
+    "sequentialthinking",
+    "generate_prd",
+    "validate_prd",
+    "list_validation_rules",
+    "list_ai_providers",
+    "create_template",
+    "list_templates",
+    "get_template",
+    "update_template",
+    "delete_template",
+    "export_templates",
+    "import_templates",
+    "list_all_rules",
+    "add_validation_rule",
+    "update_validation_rule",
+    "delete_validation_rule",
+    "stats",
+    "get_provider_config",
+    "update_provider_config",
+    "render_template",
+    "health_check",
+    "get_logs"
+  ],
+  "prdDraftToolName": "generate_prd",
+  "prdDraftRawLength": 417,
+  "prdDraftNormalizedLength": 417,
+  "generatedAt": "2026-04-12T03:32:10.763Z"
+}

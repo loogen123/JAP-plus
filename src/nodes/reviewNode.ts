@@ -2,49 +2,29 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
+import { ARTIFACT_FILES, MODELING_ARTIFACT_KEYS } from "../constants/domainConstants.js";
+import { REVIEW_NODE_LOG_TEXT } from "../constants/logTexts.js";
+import { REVIEW_NODE_SYSTEM_PROMPT } from "../constants/promptTexts.js";
 import { loadSkillContext } from "../runtime/skillContext.js";
 import { emitLogAdded, emitStageChanged } from "../runtime/workflowEvents.js";
 import type { JapState } from "../state/japState.js";
 
 export const ReviewOutputSchema = z.object({
-  passed: z.boolean().describe("是否通过了所有严格的交叉验证"),
+  passed: z.boolean().describe("Whether all strict cross-validation checks passed."),
   validationErrors: z
     .array(z.string())
-    .describe(
-      "如果不通过，列出具体的逻辑冲突或错误原因（如果通过则为空数组）",
-    ),
+    .describe("If failed, list concrete conflicts or errors; empty array when passed."),
 });
 
-const REQUIRED_ARTIFACT_KEYS = [
-  "01_\u4ea7\u54c1\u529f\u80fd\u8111\u56fe\u4e0e\u7528\u4f8b.md",
-  "02_\u9886\u57df\u6a21\u578b\u4e0e\u7269\u7406\u8868\u7ed3\u6784.md",
-  "03_\u6838\u5fc3\u4e1a\u52a1\u72b6\u6001\u673a.md",
-  "04_RESTful_API\u5951\u7ea6.yaml",
-] as const;
-
-const REVIEW_SYSTEM_PROMPT = `
-You are an extremely strict software QA architect.
-Your only mission is to cross-validate hallucination conflicts across generated artifacts.
-
-Must check:
-1. Whether request/response fields used in artifact 04 OpenAPI exist in artifact 02 domain model.
-2. Whether artifact 03 state machine transition boundaries cover all core use cases in artifact 01.
-
-If any undefined entity, field mismatch, or logic gap exists, set passed=false and list all conflicts in validationErrors.
-If perfect, set passed=true and validationErrors=[].
-Only return schema-compliant JSON.
-`.trim();
+const REQUIRED_ARTIFACT_KEYS = MODELING_ARTIFACT_KEYS;
 
 function runMockReview(state: JapState): z.infer<typeof ReviewOutputSchema> {
   const errors: string[] = [];
 
-  const useCases =
-    state.artifacts["01_\u4ea7\u54c1\u529f\u80fd\u8111\u56fe\u4e0e\u7528\u4f8b.md"] ?? "";
-  const domainModel =
-    state.artifacts["02_\u9886\u57df\u6a21\u578b\u4e0e\u7269\u7406\u8868\u7ed3\u6784.md"] ?? "";
-  const stateMachine =
-    state.artifacts["03_\u6838\u5fc3\u4e1a\u52a1\u72b6\u6001\u673a.md"] ?? "";
-  const openapi = state.artifacts["04_RESTful_API\u5951\u7ea6.yaml"] ?? "";
+  const useCases = state.artifacts[ARTIFACT_FILES.modeling01] ?? "";
+  const domainModel = state.artifacts[ARTIFACT_FILES.modeling02] ?? "";
+  const stateMachine = state.artifacts[ARTIFACT_FILES.modeling03] ?? "";
+  const openapi = state.artifacts[ARTIFACT_FILES.modeling04] ?? "";
 
   if (!openapi.includes("openapi: 3.0")) {
     errors.push("Artifact 04 must declare openapi: 3.0.x.");
@@ -69,30 +49,26 @@ function runMockReview(state: JapState): z.infer<typeof ReviewOutputSchema> {
 }
 
 export async function reviewNode(state: JapState): Promise<Partial<JapState>> {
-  emitStageChanged("REVIEW");
-  emitLogAdded("INFO", "交叉审查启动", "开始执行图纸一致性校验。");
+  emitStageChanged("QUALITY_REVIEW");
+  emitLogAdded("INFO", REVIEW_NODE_LOG_TEXT.startTitle, REVIEW_NODE_LOG_TEXT.startSummary);
 
   try {
-    const missingKeys = REQUIRED_ARTIFACT_KEYS.filter(
-      (key) => !(key in state.artifacts),
-    );
-
+    const missingKeys = REQUIRED_ARTIFACT_KEYS.filter((key) => !(key in state.artifacts));
     if (missingKeys.length > 0) {
       throw new Error(`Missing required artifacts: ${missingKeys.join(", ")}`);
     }
 
     const mockMode =
-      ["1", "true"].includes(
-        String(process.env.JAP_MOCK_MODE ?? "").toLowerCase(),
-      ) || state.llmConfig?.apiKey?.toLowerCase().startsWith("mock") === true;
+      ["1", "true"].includes(String(process.env.JAP_MOCK_MODE ?? "").toLowerCase()) ||
+      state.llmConfig?.apiKey?.toLowerCase().startsWith("mock") === true;
 
     if (mockMode) {
       const result = runMockReview(state);
       if (result.passed) {
-        emitLogAdded("SUCCESS", "交叉审查通过", "Mock 校验通过，进入下一阶段。");
+        emitLogAdded("SUCCESS", REVIEW_NODE_LOG_TEXT.passedTitle, REVIEW_NODE_LOG_TEXT.passedMockSummary);
         return { errors: [] };
       }
-      emitLogAdded("ERROR", "交叉审查失败", result.validationErrors.join(" | "));
+      emitLogAdded("ERROR", REVIEW_NODE_LOG_TEXT.failedTitle, result.validationErrors.join(" | "));
       return { errors: [...state.errors, ...result.validationErrors] };
     }
 
@@ -117,22 +93,22 @@ export async function reviewNode(state: JapState): Promise<Partial<JapState>> {
     const skillContext = await loadSkillContext(state.workspaceConfig?.path);
 
     const result = await structuredModel.invoke([
-      new SystemMessage(REVIEW_SYSTEM_PROMPT),
+      new SystemMessage(REVIEW_NODE_SYSTEM_PROMPT),
       new HumanMessage(
         [
           "Cross-review these four artifacts:",
           "",
-          "### 01_产品功能脑图与用例.md",
-          state.artifacts["01_\u4ea7\u54c1\u529f\u80fd\u8111\u56fe\u4e0e\u7528\u4f8b.md"],
+          `### ${ARTIFACT_FILES.modeling01}`,
+          state.artifacts[ARTIFACT_FILES.modeling01],
           "",
-          "### 02_领域模型与物理表结构.md",
-          state.artifacts["02_\u9886\u57df\u6a21\u578b\u4e0e\u7269\u7406\u8868\u7ed3\u6784.md"],
+          `### ${ARTIFACT_FILES.modeling02}`,
+          state.artifacts[ARTIFACT_FILES.modeling02],
           "",
-          "### 03_核心业务状态机.md",
-          state.artifacts["03_\u6838\u5fc3\u4e1a\u52a1\u72b6\u6001\u673a.md"],
+          `### ${ARTIFACT_FILES.modeling03}`,
+          state.artifacts[ARTIFACT_FILES.modeling03],
           "",
-          "### 04_RESTful_API契约.yaml",
-          state.artifacts["04_RESTful_API\u5951\u7ea6.yaml"],
+          `### ${ARTIFACT_FILES.modeling04}`,
+          state.artifacts[ARTIFACT_FILES.modeling04],
           "",
           "Skill context:",
           skillContext || "(none)",
@@ -141,17 +117,17 @@ export async function reviewNode(state: JapState): Promise<Partial<JapState>> {
     ]);
 
     if (result.passed) {
-      emitLogAdded("SUCCESS", "交叉审查通过", "图纸无冲突，允许进入细化阶段。");
+      emitLogAdded("SUCCESS", REVIEW_NODE_LOG_TEXT.passedTitle, REVIEW_NODE_LOG_TEXT.passedSummary);
       return { errors: [] };
     }
 
-    emitLogAdded("ERROR", "交叉审查失败", result.validationErrors.join(" | "));
+    emitLogAdded("ERROR", REVIEW_NODE_LOG_TEXT.failedTitle, result.validationErrors.join(" | "));
     return {
       errors: [...state.errors, ...result.validationErrors],
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    emitLogAdded("ERROR", "交叉审查失败", message);
+    emitLogAdded("ERROR", REVIEW_NODE_LOG_TEXT.failedTitle, message);
     return {
       errors: [...state.errors, `Review node failed: ${message}`],
     };

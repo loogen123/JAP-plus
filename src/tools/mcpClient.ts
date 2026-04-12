@@ -10,6 +10,133 @@ const PRD_TOOL_CANDIDATES = [
   "enhance_prd_content",
 ] as const;
 
+type McpTextBlock = {
+  text?: unknown;
+  type?: unknown;
+};
+
+type McpCallToolResult = {
+  content?: unknown;
+  data?: unknown;
+  isError?: boolean;
+  result?: unknown;
+};
+
+type ListedTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
+
+type SequentialThinkingToolHandle = {
+  client: Client;
+  tool: ListedTool;
+};
+
+type McpLogSeverity = "debug" | "warn" | "error";
+
+type McpErrorCode =
+  | "MCP_OPTIONAL_SERVER_CONNECT_FAILED"
+  | "MCP_REQUIRED_SERVER_CONNECT_FAILED"
+  | "MCP_LIST_TOOLS_FAILED"
+  | "MCP_CALL_TOOL_FAILED"
+  | "MCP_TOOL_NOT_FOUND"
+  | "MCP_READ_CONTEXT_FILE_FAILED"
+  | "MCP_FIND_SEQUENTIAL_TOOL_FAILED"
+  | "MCP_FIND_PRD_TOOL_FAILED";
+
+type McpLogEvent = {
+  severity: McpLogSeverity;
+  code: McpErrorCode;
+  message: string;
+  context?: Record<string, unknown>;
+  error?: unknown;
+};
+
+type SerializedError = {
+  name?: string;
+  message: string;
+  code?: string;
+};
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function readOwnProperty(value: Record<PropertyKey, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+}
+
+function asToolResult(value: unknown): McpCallToolResult {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const out: McpCallToolResult = {
+    content: readOwnProperty(value, "content"),
+    data: readOwnProperty(value, "data"),
+    result: readOwnProperty(value, "result"),
+  };
+  const isError = readOwnProperty(value, "isError");
+  if (typeof isError === "boolean") {
+    out.isError = isError;
+  }
+  return out;
+}
+
+function isTextBlock(value: unknown): value is McpTextBlock {
+  return Boolean(value) && typeof value === "object";
+}
+
+function getTextFromBlock(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!isTextBlock(value)) {
+    return "";
+  }
+  return typeof value.text === "string" ? value.text : "";
+}
+
+function readFirstTextBlock(result: unknown): string {
+  const typed = asToolResult(result);
+  if (!Array.isArray(typed.content)) {
+    return "";
+  }
+  return getTextFromBlock(typed.content[0]);
+}
+
+function flattenTextBlocks(content: unknown): string {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((block) => getTextFromBlock(block))
+    .join("\n")
+    .trim();
+}
+
+function serializeError(error: unknown): SerializedError {
+  if (error instanceof Error) {
+    const result: SerializedError = {
+      name: error.name,
+      message: error.message,
+    };
+    if (isRecord(error)) {
+      const maybeCode = readOwnProperty(error, "code");
+      if (typeof maybeCode === "string") {
+        result.code = maybeCode;
+      }
+    }
+    return result;
+  }
+  if (typeof error === "string") {
+    return { message: error };
+  }
+  return { message: "Unknown MCP error" };
+}
+
+type ServerConfig = {
+  name: string;
+  args: string[];
+  optional?: boolean;
+};
+
 export class JapMcpClient {
   private static sharedClient: JapMcpClient | null = null;
   private static sharedAllowedDir: string | null = null;
@@ -31,6 +158,28 @@ export class JapMcpClient {
       name: "j-ap-plus-mcp-client",
       version: "0.1.0",
     });
+  }
+
+  private logMcpEvent(event: McpLogEvent): void {
+    const payload = {
+      timestamp: new Date().toISOString(),
+      component: "JapMcpClient",
+      severity: event.severity,
+      code: event.code,
+      message: event.message,
+      context: event.context,
+      error: event.error ? serializeError(event.error) : undefined,
+    };
+    const line = JSON.stringify(payload);
+    if (event.severity === "error") {
+      console.error(line);
+      return;
+    }
+    if (event.severity === "warn") {
+      console.warn(line);
+      return;
+    }
+    console.info(line);
   }
 
   static async getSharedClient(allowedDir: string): Promise<JapMcpClient> {
@@ -60,7 +209,7 @@ export class JapMcpClient {
     const isWin = process.platform === "win32";
     const npx = isWin ? "npx.cmd" : "npx";
 
-    const serverConfigs = [
+    const serverConfigs: ServerConfig[] = [
       {
         name: "filesystem",
         args: ["-y", "@modelcontextprotocol/server-filesystem", allowedDir],
@@ -94,9 +243,23 @@ export class JapMcpClient {
           toolNames: new Set<string>(),
         });
       } catch (error) {
-        if (!(config as { optional?: boolean }).optional) {
+        if (!config.optional) {
+          this.logMcpEvent({
+            severity: "error",
+            code: "MCP_REQUIRED_SERVER_CONNECT_FAILED",
+            message: "Required MCP server failed to connect",
+            context: { serverName: config.name },
+            error,
+          });
           throw error;
         }
+        this.logMcpEvent({
+          severity: "warn",
+          code: "MCP_OPTIONAL_SERVER_CONNECT_FAILED",
+          message: "Optional MCP server failed to connect and was skipped",
+          context: { serverName: config.name },
+          error,
+        });
       }
     }
 
@@ -109,20 +272,54 @@ export class JapMcpClient {
     }
   }
 
-  private async callToolAcrossServers(name: string, args: any) {
+  private async callToolAcrossServers(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<McpCallToolResult> {
     for (const holder of this.clients) {
-      try {
-        if (!holder.toolNames.has(name)) {
+      if (!holder.toolNames.has(name)) {
+        try {
           const { tools } = await holder.client.listTools();
           holder.toolNames = new Set(tools.map((t) => t.name));
+        } catch (error) {
+          this.logMcpEvent({
+            severity: "warn",
+            code: "MCP_LIST_TOOLS_FAILED",
+            message: "Failed to list tools from MCP server",
+            context: { serverName: holder.name, requestedTool: name },
+            error,
+          });
+          continue;
         }
-        if (holder.toolNames.has(name)) {
-          return await holder.client.callTool({ name, arguments: args });
+      }
+      if (holder.toolNames.has(name)) {
+        try {
+          return asToolResult(await holder.client.callTool({ name, arguments: args }));
+        } catch (error) {
+          this.logMcpEvent({
+            severity: "warn",
+            code: "MCP_CALL_TOOL_FAILED",
+            message: "Failed to call MCP tool on server",
+            context: {
+              serverName: holder.name,
+              requestedTool: name,
+              argumentKeys: Object.keys(args),
+            },
+            error,
+          });
+          continue;
         }
-      } catch (error) {
-        continue;
       }
     }
+    this.logMcpEvent({
+      severity: "error",
+      code: "MCP_TOOL_NOT_FOUND",
+      message: "MCP tool was not found across registered servers",
+      context: {
+        requestedTool: name,
+        connectedServers: this.clients.map((client) => client.name),
+      },
+    });
     throw new Error(`Tool ${name} not found in any registered MCP server`);
   }
 
@@ -159,13 +356,20 @@ export class JapMcpClient {
         const result = await this.callToolAcrossServers("read_text_file", {
           path: filePath,
         });
-        if (!("isError" in result && result.isError)) {
-          const text = (result.content as any)?.[0]?.text;
+        if (!result.isError) {
+          const text = readFirstTextBlock(result);
           if (text) {
             contents.push(`--- ${file} ---\n${text}\n`);
           }
         }
       } catch (error) {
+        this.logMcpEvent({
+          severity: "debug",
+          code: "MCP_READ_CONTEXT_FILE_FAILED",
+          message: "Failed to read project context file via MCP; continuing",
+          context: { fileName: file, projectRoot },
+          error,
+        });
         continue;
       }
     }
@@ -177,7 +381,7 @@ export class JapMcpClient {
     return value;
   }
 
-  async getSequentialThinkingTool() {
+  async getSequentialThinkingTool(): Promise<SequentialThinkingToolHandle | null> {
     for (const { client } of this.clients) {
       try {
         const { tools } = await client.listTools();
@@ -186,6 +390,13 @@ export class JapMcpClient {
           return { client, tool };
         }
       } catch (error) {
+        this.logMcpEvent({
+          severity: "warn",
+          code: "MCP_FIND_SEQUENTIAL_TOOL_FAILED",
+          message: "Failed to inspect MCP server for sequential thinking tool",
+          context: { requestedTool: "sequentialthinking" },
+          error,
+        });
         continue;
       }
     }
@@ -199,6 +410,12 @@ export class JapMcpClient {
         const { tools } = await holder.client.listTools();
         tools.forEach((tool) => names.add(tool.name));
       } catch {
+        this.logMcpEvent({
+          severity: "debug",
+          code: "MCP_LIST_TOOLS_FAILED",
+          message: "Failed to list tools from MCP server while aggregating names",
+          context: { serverName: holder.name },
+        });
       }
     }
     return [...names];
@@ -211,7 +428,7 @@ export class JapMcpClient {
   private async callToolByCandidateNames(
     names: string[],
     args: Record<string, unknown>,
-  ): Promise<{ name: string; result: any } | null> {
+  ): Promise<{ name: string; result: McpCallToolResult } | null> {
     for (const holder of this.clients) {
       try {
         const { tools } = await holder.client.listTools();
@@ -223,8 +440,15 @@ export class JapMcpClient {
           name: toolName,
           arguments: args,
         });
-        return { name: toolName, result };
-      } catch {
+        return { name: toolName, result: asToolResult(result) };
+      } catch (error) {
+        this.logMcpEvent({
+          severity: "warn",
+          code: "MCP_FIND_PRD_TOOL_FAILED",
+          message: "Failed while searching or invoking PRD tool candidate",
+          context: { candidateNames: names },
+          error,
+        });
         continue;
       }
     }
@@ -245,21 +469,7 @@ export class JapMcpClient {
       return null;
     }
     const contentBlocks = called.result?.content;
-    let text = "";
-    if (Array.isArray(contentBlocks)) {
-      text = contentBlocks
-        .map((block: any) => {
-          if (typeof block?.text === "string") {
-            return block.text;
-          }
-          if (typeof block === "string") {
-            return block;
-          }
-          return "";
-        })
-        .join("\n")
-        .trim();
-    }
+    let text = flattenTextBlocks(contentBlocks);
     if (!text && typeof called.result?.result === "string") {
       text = String(called.result.result).trim();
     }
