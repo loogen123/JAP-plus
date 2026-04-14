@@ -981,6 +981,19 @@
         finishBtn.disabled=false;
         finishBtn.textContent="完成问卷";
       }
+
+      // 始终显示一个强行中断的次级按钮
+      const forceFinishBtn = document.getElementById("forceFinishBtn");
+      if(!forceFinishBtn) {
+        const btn = document.createElement("button");
+        btn.id = "forceFinishBtn";
+        btn.className = "btn btn-light";
+        btn.style.color = "#d85555";
+        btn.style.borderColor = "#f1c3c3";
+        btn.textContent = "结束澄清并生成需求";
+        btn.onclick = finishQuestionnaire;
+        document.querySelector("#questionnaireModal .modal-ft").prepend(btn);
+      }
     }
 
     function scheduleBackgroundFinalize(reason){
