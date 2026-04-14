@@ -134,12 +134,30 @@
       <div class="hd"><h2 class="title">数字工作区</h2><p class="sub">generated-workspace/</p></div>
       <div class="bd workspace">
         <div><div class="kv"><span>状态</span><span id="workspaceStage">就绪</span></div><div class="kv"><span>进度</span><span id="workspaceProgressText">0%</span></div><div class="progress-track"><div id="workspaceProgressBar" class="progress-bar"></div></div></div>
-        <div><div class="kv"><span>文件列表</span><span id="artifactCount">0 个</span></div><div id="fileTree" class="tree">暂无生成文件</div></div>
-        <div><div class="kv"><span>预览/编辑</span><span id="previewName">--</span></div><textarea id="filePreview" class="preview" style="min-height:220px;width:100%;border:none;outline:none;resize:vertical;background:#fff;"></textarea></div>
-        <div><div class="kv"><span>操作</span><span id="workspacePathLabel">output</span></div><div id="workspaceStatus" style="font-size:13px;color:var(--muted);">未设置</div><div class="flex gap-2" style="margin-top:8px;flex-wrap:wrap;"><button id="btnGenerateNext" class="btn btn-primary" onclick="filewiseGenerateNext()">生成下一步</button><button id="btnApprove" class="btn btn-light" onclick="filewiseApprove()">通过</button><button id="btnReject" class="btn btn-light" onclick="filewiseReject()">驳回</button><button id="btnRegenerate" class="btn btn-light" onclick="filewiseRegenerate()">重生成</button><button id="btnSaveEdit" class="btn btn-light" onclick="filewiseSaveEdit()">保存编辑</button></div><input id="fileRejectReason" class="field" style="margin-top:8px;" placeholder="驳回原因（可选）" /></div>
+        <div><div class="kv"><span>文件列表</span><span id="artifactCount">0 个</span></div><div id="fileTree" class="tree" style="min-height:300px;max-height:calc(100vh - 350px);">暂无生成文件</div></div>
+        <div><div class="kv"><span>工作目录</span><span id="workspacePathLabel">output</span></div><div id="workspaceStatus" style="font-size:13px;color:var(--muted);">未设置</div><div class="flex gap-2" style="margin-top:12px;flex-direction:column;gap:8px;"><button id="btnGenerateNext" class="btn btn-primary" style="width:100%;padding:12px;" onclick="filewiseGenerateNext()">生成下一步</button><button id="btnAutoRun" class="btn btn-light" style="width:100%;padding:12px;border-color:#a8c5ff;color:#2f5d9e;background:#f2f7ff;" onclick="toggleAutoRun()">一键自动生成 (免审核)</button></div></div>
       </div>
     </aside>
   </section>
+
+  <div id="fileReviewModal" class="modal">
+    <div class="modal-card" style="width:min(900px,90vw);">
+      <div class="modal-hd" style="display:flex;justify-content:space-between;">
+        <span>文件审阅：<span id="previewName">--</span></span>
+        <button class="btn btn-light" style="padding:4px 8px;font-size:12px;" onclick="closeFileReviewModal()">X</button>
+      </div>
+      <div class="modal-bd">
+        <textarea id="filePreview" class="preview" style="min-height:400px;width:100%;border:1px solid var(--line);outline:none;resize:vertical;padding:12px;"></textarea>
+      </div>
+      <div class="modal-ft" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <div style="flex:1;"><input id="fileRejectReason" class="field" placeholder="驳回原因（可选）" /></div>
+        <button id="btnSaveEdit" class="btn btn-light" onclick="filewiseSaveEdit()">保存修改</button>
+        <button id="btnRegenerate" class="btn btn-light" onclick="filewiseRegenerate()">重新生成</button>
+        <button id="btnReject" class="btn btn-light" style="color:var(--red)" onclick="filewiseReject()">驳回重做</button>
+        <button id="btnApprove" class="btn btn-primary" onclick="filewiseApprove()">确认通过</button>
+      </div>
+    </div>
+  </div>
 
   <div id="settingsModal" class="modal"><div class="modal-card"><div class="modal-hd">系统设置</div><div class="modal-bd"><div class="label" style="font-size:14px;margin:0;">LLM Base URL</div><input id="llmBaseUrl" class="field" placeholder="https://api.deepseek.com" /><div class="label" style="font-size:14px;margin:0;">LLM Model Name</div><input id="llmModelName" class="field" placeholder="deepseek-chat" /><div class="label" style="font-size:14px;margin:0;">LLM API Key（当前 Tab 独立）</div><input id="llmApiKey" type="password" class="field" placeholder="请输入 API Key" /><div id="testConnResult" style="font-size:13px; margin-top: 4px; display: none;"></div><div class="label" style="font-size:14px;margin:0;">澄清模式</div><select id="elicitationMode" class="field"><option value="quick">快速模式（默认）</option><option value="deep">深度模式（更慢）</option></select><div class="label" style="font-size:14px;margin:0;">Workspace Path（全局共享）</div><div class="flex gap-2"><input id="workspacePath" class="field" placeholder="D:/GitProgram/JAP plus/output" onchange="validateWorkspace()" /><button class="btn btn-light" onclick="chooseWorkspaceFolder()">选择目录</button></div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeSettings()">取消</button><button class="btn btn-light" onclick="testLlmConnection()">测试连接</button><button class="btn btn-primary" onclick="saveSettings()">保存设置</button></div></div></div>
 
@@ -171,6 +189,7 @@
     let activeQuestionnaire = [];
     let questionIndex = 0;
     const answers = {};
+    const customAnswers = {};
     let finalizedRequirement = "";
     let questionnaireLoading = false;
     let questionnaireFullyLoaded = false;
@@ -192,13 +211,25 @@
     let currentRunId = null;
     let currentRunState = null;
     let selectedFileId = null;
+    let isAutoRunning = false;
 
     function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
     function normalizeAnswersForApi(){
       const out = {};
-      Object.entries(answers).forEach(([k,v])=>{
-        if(Array.isArray(v)) out[k] = v;
-        else out[k] = String(v ?? "");
+      const allKeys = new Set([...Object.keys(answers), ...Object.keys(customAnswers)]);
+      allKeys.forEach((k) => {
+        const aiAns = answers[k];
+        const custAns = customAnswers[k] || [];
+        if(Array.isArray(aiAns)){
+          out[k] = [...aiAns, ...custAns];
+        } else {
+          const base = aiAns !== undefined ? String(aiAns) : "";
+          if(custAns.length > 0){
+            out[k] = base ? `${base}。补充：${custAns.join("；")}` : custAns.join("；");
+          } else {
+            out[k] = base;
+          }
+        }
       });
       return out;
     }
@@ -258,22 +289,44 @@
     function updateLlmChip(ok){ const el=document.getElementById("llmChip"); el.className="chip "+(ok?"green":"red"); el.textContent=ok?"LLM: configured":"LLM: not configured"; }
     function updateWsChip(status){ const el=document.getElementById("wsChip"); el.className="chip "+(status==="connected"?"green":status==="disconnected"?"red":""); el.textContent="WebSocket: "+status; }
 
+    let wsPingTimer = null;
+
     function connectWebSocket(taskId){
       if(taskId!==undefined&&taskId!==null) currentTaskId=taskId;
       if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
       if(wsReconnectTimer){ clearTimeout(wsReconnectTimer); wsReconnectTimer=null; }
+      if(wsPingTimer){ clearInterval(wsPingTimer); wsPingTimer=null; }
+      
       updateWsChip("connecting");
       const protocol = window.location.protocol==="https:" ? "wss:" : "ws:";
       ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-      ws.onopen = () => updateWsChip("connected");
+      
+      ws.onopen = () => {
+        updateWsChip("connected");
+        wsPingTimer = setInterval(() => {
+          if(ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 30000);
+      };
       ws.onmessage = (event) => {
         let payload; try { payload = JSON.parse(event.data); } catch { return; }
+        if(payload.type === "elicitation-result") {
+          if(typeof handleElicitationResult === "function") handleElicitationResult(payload.payload || payload.data);
+          return;
+        }
         const eventTaskId = payload?.data?.taskId ?? null;
         if(eventTaskId!==currentTaskId) return;
         handleEvent(payload);
       };
       ws.onerror = () => updateWsChip("disconnected");
-      ws.onclose = () => { updateWsChip("disconnected"); ws=null; wsReconnectTimer=setTimeout(()=>connectWebSocket(currentTaskId),3000); };
+      ws.onclose = () => { 
+        addLog("系统", "WebSocket 已断开，正在重连...", "error");
+        updateWsChip("disconnected"); 
+        if(wsPingTimer) { clearInterval(wsPingTimer); wsPingTimer=null; }
+        ws=null; 
+        wsReconnectTimer=setTimeout(()=>connectWebSocket(currentTaskId),3000); 
+      };
     }
     function connectWebSocketForTask(taskId){ currentTaskId=taskId||null; connectWebSocket(currentTaskId); }
 
@@ -463,23 +516,49 @@
       return added;
     }
 
-    async function requestClarificationRound({requirement,llm,context,workspace,elicitationMode,batchSize,targetTotal,timeoutMs}){
-      let timer = null;
-      const controller = new AbortController();
-      try{
-        timer = setTimeout(() => controller.abort(), timeoutMs || 60000);
-        const resp=await fetch(API_BASE+"/api/v1/elicitation/questionnaire",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({requirement,llm,context,workspace,elicitationMode,batchSize,targetTotal}),
-          signal:controller.signal
-        });
-        const data=await resp.json();
-        if(!resp.ok) throw new Error(data?.message||"问卷生成失败");
-        return data;
-      }finally{
-        if(timer) clearTimeout(timer);
+    let elicitationResolve = null;
+
+    function handleElicitationResult(data) {
+      if(elicitationResolve) {
+        elicitationResolve(data);
+        elicitationResolve = null;
       }
+    }
+
+    async function requestClarificationRound({requirement,llm,context,workspace,elicitationMode,batchSize,targetTotal,timeoutMs}){
+      return new Promise(async (resolve, reject) => {
+        elicitationResolve = resolve;
+        let timer = null;
+        const controller = new AbortController();
+        try{
+          timer = setTimeout(() => controller.abort(), timeoutMs || 60000);
+          const resp=await fetch(API_BASE+"/api/v1/elicitation/questionnaire",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({requirement,llm,context,workspace,elicitationMode,batchSize,targetTotal}),
+            signal:controller.signal
+          });
+          if(!resp.ok) {
+            const rawText = await resp.text();
+            let data;
+            try{
+              data = rawText ? JSON.parse(rawText) : {};
+            }catch{
+              const head = rawText ? rawText.slice(0, 240) : "";
+              elicitationResolve = null;
+              reject(new Error(`问卷接口返回非JSON（status=${resp.status}）：${head || resp.statusText}`));
+              return;
+            }
+            elicitationResolve = null;
+            reject(new Error(data?.message||`问卷生成失败（status=${resp.status}）`));
+          }
+        }catch(e){
+          elicitationResolve = null;
+          reject(e);
+        }finally{
+          if(timer) clearTimeout(timer);
+        }
+      });
     }
 
     async function generateQuestionnaire(){
@@ -496,13 +575,14 @@
       questionnaireLoading = true;
       backgroundElicitationStop = false;
       Object.keys(answers).forEach((k)=>delete answers[k]);
+      Object.keys(customAnswers).forEach((k)=>delete customAnswers[k]);
       if(progressiveAppendTimer){ clearInterval(progressiveAppendTimer); progressiveAppendTimer = null; }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
       const workspace=workspacePath ? { path:workspacePath } : (getWorkspacePathConfig()||{});
       const targetTotal = 100;
-      const firstBatchSize = elicitationMode==="deep" ? 24 : 12;
-      const backgroundBatchSize = elicitationMode==="deep" ? 18 : 10;
-      const requestTimeoutMs = elicitationMode==="deep" ? 90000 : 45000;
+      const firstBatchSize = elicitationMode==="deep" ? 12 : 6;
+      const backgroundBatchSize = elicitationMode==="deep" ? 12 : 8;
+      const requestTimeoutMs = elicitationMode==="deep" ? 120000 : 90000;
       openQuestionnaireModal();
       addLog("系统",`AI 正在发起澄清（${elicitationMode==="deep"?"深度":"快速"}模式）...`);
       try{
@@ -608,6 +688,54 @@
       document.getElementById("finalizeModal").classList.remove("show");
       refreshDesignButtonState();
     }
+    function openFileReviewModal(){ document.getElementById("fileReviewModal").classList.add("show"); }
+    function closeFileReviewModal(){ document.getElementById("fileReviewModal").classList.remove("show"); }
+
+    function toggleAutoRun() {
+      if(isAutoRunning) {
+        isAutoRunning = false;
+        addLog("系统", "已停止自动生成");
+        document.getElementById("btnAutoRun").textContent = "一键自动生成 (免审核)";
+        document.getElementById("btnAutoRun").style.background = "#f2f7ff";
+        document.getElementById("btnAutoRun").style.color = "#2f5d9e";
+        document.getElementById("btnAutoRun").style.borderColor = "#a8c5ff";
+      } else {
+        if(!currentRunId) { addLog("系统", "当前没有正在运行的任务"); return; }
+        isAutoRunning = true;
+        addLog("系统", "已开启一键自动生成，将自动跑完所有文件...");
+        document.getElementById("btnAutoRun").textContent = "停止自动生成";
+        document.getElementById("btnAutoRun").style.background = "#fff7f7";
+        document.getElementById("btnAutoRun").style.color = "#d85555";
+        document.getElementById("btnAutoRun").style.borderColor = "#f1c3c3";
+        autoRunLoop();
+      }
+    }
+
+    async function autoRunLoop() {
+      while(isAutoRunning && currentRunId && currentRunState) {
+        const actions = currentRunState.actions || {};
+        if(currentRunState.stage === "DONE" || !currentRunState.currentFile) {
+          addLog("系统", "自动生成已完成", "success");
+          toggleAutoRun();
+          break;
+        }
+        try {
+          if(actions.canGenerateNext) {
+            await filewiseGenerateNext();
+          } else if(actions.canApprove) {
+            await filewiseApprove();
+          } else {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        } catch(e) {
+          addLog("错误", "自动生成遇到错误，已暂停", "error");
+          toggleAutoRun();
+          break;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
     function getActiveWorkspacePath(){
       const p=(document.getElementById("workspacePath").value||"").trim();
       if(p) return p;
@@ -809,8 +937,7 @@
       if(type==="multiple" && !Array.isArray(answers[q.id])){ answers[q.id]=[]; }
       const selectedSingle = typeof answers[q.id] === "string" ? answers[q.id] : q.options[0];
       const selectedMulti = Array.isArray(answers[q.id]) ? answers[q.id] : [];
-      const customSingleValue = type==="single" && typeof answers[q.id] === "string" && !q.options.includes(answers[q.id]) ? answers[q.id] : "";
-      const customMultiValues = type==="multiple" ? selectedMulti.filter((v)=>!q.options.includes(v)) : [];
+      const customList = customAnswers[q.id] || [];
       const optionsHtml=q.options.map((opt)=>{
         const escapedQid = q.id.replace(/'/g,"\\'");
         const escapedOpt = opt.replace(/'/g,"\\'");
@@ -820,16 +947,16 @@
         return `<label class="q-option"><input type="radio" name="modal_q_${q.id}" value="${esc(opt)}" ${selectedSingle===opt?"checked":""} onchange="setModalAnswer('${escapedQid}','${escapedOpt}')"/> <span>${esc(opt)}</span></label>`;
       }).join("");
       const escapedQid = q.id.replace(/'/g,"\\'");
-      const customListHtml = customMultiValues.map((item)=>{
+      const customListHtml = customList.map((item)=>{
         const escapedItem = String(item).replace(/'/g,"\\'");
         return `<div style="display:flex;align-items:center;gap:8px;margin-top:6px;"><span style="font-size:12px;padding:2px 8px;border:1px solid var(--line2);border-radius:999px;color:#4f5f7d;background:#f8fbff;">${esc(item)}</span><button class="btn btn-light" style="padding:4px 8px;font-size:12px;" onclick="removeCustomAnswer('${escapedQid}','${escapedItem}')">移除</button></div>`;
       }).join("");
       const customAnswerHtml = `
         <div style="margin-top:10px;border-top:1px dashed var(--line2);padding-top:10px;">
-          <div style="font-size:13px;color:#5f6f8e;margin-bottom:6px;">自定义输入（不使用 AI 提供选项时可填写）</div>
+          <div style="font-size:13px;color:#5f6f8e;margin-bottom:6px;">自定义补充（可添加多条，作为 AI 选项的补充）</div>
           <div style="display:flex;gap:8px;align-items:center;">
-            <input id="customInput_${q.id}" class="field" style="padding:8px 10px;" placeholder="请输入自定义答案" value="${esc(customSingleValue)}" />
-            <button class="btn btn-light" onclick="applyCustomAnswer('${escapedQid}','${type}')">${type==="multiple"?"添加":"使用"}</button>
+            <input id="customInput_${q.id}" class="field" style="padding:8px 10px;" placeholder="请输入补充答案" value="" />
+            <button class="btn btn-light" onclick="applyCustomAnswer('${escapedQid}')">添加</button>
           </div>
           ${customListHtml}
         </div>
@@ -897,27 +1024,19 @@
       answers[qid]=Array.from(next);
       scheduleBackgroundFinalize("multiple");
     }
-    function applyCustomAnswer(qid,type){
+    function applyCustomAnswer(qid){
       const input=document.getElementById(`customInput_${qid}`);
       const value=(input?.value||"").trim();
       if(!value){ addLog("系统","请输入自定义答案后再提交。"); return; }
-      if(type==="multiple"){
-        if(!Array.isArray(answers[qid])) answers[qid]=[];
-        const next = new Set(answers[qid]);
-        next.add(value);
-        answers[qid]=Array.from(next);
-        input.value="";
-        scheduleBackgroundFinalize("custom-multiple");
-        renderCurrentQuestion();
-        return;
-      }
-      answers[qid]=value;
-      scheduleBackgroundFinalize("custom-single");
+      if(!customAnswers[qid]) customAnswers[qid]=[];
+      if(!customAnswers[qid].includes(value)) customAnswers[qid].push(value);
+      input.value="";
+      scheduleBackgroundFinalize("custom-add");
       renderCurrentQuestion();
     }
     function removeCustomAnswer(qid,value){
-      if(!Array.isArray(answers[qid])) return;
-      answers[qid]=answers[qid].filter((item)=>item!==value);
+      if(!customAnswers[qid]) return;
+      customAnswers[qid]=customAnswers[qid].filter((item)=>item!==value);
       scheduleBackgroundFinalize("custom-remove");
       renderCurrentQuestion();
     }
@@ -1070,6 +1189,10 @@
       updateFileTree(currentRunState?.files || []);
       if(currentRunState?.currentFile===fileId){
         document.getElementById("filePreview").value = currentRunState?.currentFileContent || "";
+        const currentFileRec = currentRunState?.files?.find(f => f.fileId === fileId);
+        if(currentFileRec && (currentFileRec.status === "GENERATED" || currentFileRec.status === "REVIEWING" || currentFileRec.status === "REJECTED")) {
+          openFileReviewModal();
+        }
       }
     }
     async function refreshFilewiseRun(){
@@ -1087,8 +1210,17 @@
       if(data.currentFile){
         document.getElementById("previewName").textContent = data.currentFile;
         document.getElementById("filePreview").value = data.currentFileContent || "";
+        const currentFileRec = data.files.find(f => f.fileId === data.currentFile);
+        if (currentFileRec && (currentFileRec.status === "GENERATED" || currentFileRec.status === "REVIEWING" || currentFileRec.status === "REJECTED")) {
+          if(!isAutoRunning) {
+            openFileReviewModal();
+          }
+        } else {
+          closeFileReviewModal();
+        }
       }else{
         document.getElementById("filePreview").value = "";
+        closeFileReviewModal();
       }
       document.getElementById("workspaceStatus").textContent=`当前目录：${data.workspacePath || workspacePath || "output"}`;
       document.getElementById("workspacePathLabel").textContent=data.workspacePath || workspacePath || "output";

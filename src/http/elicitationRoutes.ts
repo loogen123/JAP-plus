@@ -2,7 +2,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import type { Express } from "express";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 
@@ -60,7 +60,32 @@ type DraftFiles = {
   finalPath: string;
 };
 
-const FAST_ELICITATION_TIMEOUT_MS = 60000;
+const FAST_ELICITATION_TIMEOUT_MS = 90000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(new Error(`${label} timeout`));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout`)), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function clampText(input: string, maxChars: number): string {
+  if (input.length <= maxChars) {
+    return input;
+  }
+  return input.slice(0, maxChars);
+}
 
 function clampInteger(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) {
@@ -82,35 +107,53 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
 
+async function readProjectContextLocal(projectRoot: string): Promise<string> {
+  const targetFiles = ["package.json", "README.md", "pom.xml", ".jap-skills.md"];
+  const contents: string[] = [];
+  for (const file of targetFiles) {
+    try {
+      const filePath = path.join(projectRoot, file);
+      const raw = await readFile(filePath, "utf-8");
+      const text = raw.trim();
+      if (text) {
+        contents.push(`--- ${file} ---\n${text}\n`);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return contents.join("\n");
+}
+
 function buildFallbackQuestionnaire(): ClarificationQuestion[] {
   return [
     {
       id: "Q_CORE_1",
       dimension: QUESTION_DIMENSIONS.core,
       questionType: "single",
-      questionText: "Should core entities use tenant and store level isolation?",
-      options: ["Use tenant_id + store_id", "Use tenant_id only", "No isolation field"],
+      questionText: "核心实体是否需要使用租户（Tenant）和门店（Store）级别的隔离？",
+      options: ["需要租户和门店双重隔离", "仅需要租户隔离", "不需要隔离字段"],
     },
     {
       id: "Q_STATE_1",
       dimension: QUESTION_DIMENSIONS.state,
       questionType: "single",
-      questionText: "What is the default convergence strategy for timeout/failure?",
-      options: ["Auto rollback to initial state", "Move to manual handling", "Keep state and alert"],
+      questionText: "对于超时或失败的流程，默认的收敛策略是什么？",
+      options: ["自动回滚到初始状态", "转入人工处理队列", "保持当前状态并触发告警"],
     },
     {
       id: "Q_SEC_1",
       dimension: QUESTION_DIMENSIONS.security,
       questionType: "multiple",
-      questionText: "Which security controls should be enabled by default?",
-      options: ["RBAC", "Audit logs", "Sensitive-field masking", "Critical action confirmation"],
+      questionText: "系统默认需要开启哪些安全控制机制？",
+      options: ["基于角色的权限控制 (RBAC)", "全链路审计日志", "敏感字段脱敏展示", "高危操作二次确认"],
     },
     {
       id: "Q_DEP_1",
       dimension: QUESTION_DIMENSIONS.dependency,
       questionType: "single",
-      questionText: "What is the preferred strategy when external dependencies fail?",
-      options: ["Fail fast and retry", "Use local fallback", "Async compensation"],
+      questionText: "当外部依赖系统宕机或无响应时，首选的降级策略是什么？",
+      options: ["快速失败并提示重试", "使用本地缓存/默认值降级", "异步记录并稍后补偿"],
     },
   ];
 }
@@ -202,7 +245,18 @@ async function writeFinalizeDraftFiles(params: {
   return { runId, statusPath, rawPath, normalizedPath, inputPath, finalPath };
 }
 
-export function registerElicitationRoutes(app: Express): void {
+import { WebSocketServer } from "ws";
+
+function wssBroadcastElicitationResult(wss: WebSocketServer, result: any) {
+  const msg = JSON.stringify({ type: "elicitation-result", payload: result });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(msg);
+    }
+  });
+}
+
+export function registerElicitationRoutes(app: Express, wss: WebSocketServer): void {
   app.post("/api/v1/elicitation/questionnaire", async (req, res) => {
     const requirement = String(req.body?.requirement ?? "").trim();
     const contextParse = ClarificationContextSchema.safeParse(req.body?.context ?? {});
@@ -234,12 +288,15 @@ export function registerElicitationRoutes(app: Express): void {
       return;
     }
 
-    try {
-      const startedAt = Date.now();
-      const mcpClient = await JapMcpClient.getSharedClient(workspacePath);
+    res.json({ accepted: true, message: "Elicitation started, result will be sent via WebSocket" });
+
+    (async () => {
+      try {
+        const startedAt = Date.now();
+        const hardDeadlineMs = elicitationMode === "deep" ? 180000 : 90000;
 
       const contextStartedAt = Date.now();
-      const projectContextStr = await mcpClient.readProjectContext(workspacePath);
+      const projectContextStr = await readProjectContextLocal(workspacePath);
       const skillContext = await loadSkillContext(workspacePath);
       const contextCostMs = Date.now() - contextStartedAt;
 
@@ -247,65 +304,84 @@ export function registerElicitationRoutes(app: Express): void {
       let deepThinkingCostMs = 0;
 
       if (elicitationMode === "deep") {
-        const seqThinking = await mcpClient.getSequentialThinkingTool();
-        if (seqThinking) {
-          const tools = [
-            {
-              type: "function",
-              function: {
-                name: seqThinking.tool.name,
-                description: seqThinking.tool.description,
-                parameters: seqThinking.tool.inputSchema,
-              },
-            },
-          ];
-
-          const thinkModel = new ChatOpenAI({
-            model: modelName,
-            apiKey,
-            configuration: { baseURL: baseUrl },
-            temperature: 0.1,
-            timeout: FAST_ELICITATION_TIMEOUT_MS,
-            maxRetries: 0,
-          }).bindTools(tools);
-
-          const thinkingStartedAt = Date.now();
-          const initialResponse = await thinkModel.invoke([
-            new SystemMessage(DEEP_THINKING_SYSTEM_PROMPT),
-            new HumanMessage(
-              JSON.stringify({
-                originalRequirement: requirement,
-                refinedRequirement: context.refinedRequirement ?? "",
-                previousRounds: context.previousRounds ?? [],
-                answers: context.answers ?? {},
-                projectContext: projectContextStr,
-                skillContext,
-              }),
-            ),
-          ]);
-
-          if (Array.isArray(initialResponse.tool_calls)) {
-            const firstCall = initialResponse.tool_calls[0];
-            if (firstCall && firstCall.name === "sequentialthinking") {
-              const args = isRecord(firstCall.args) ? firstCall.args : {};
-              const toolResult = await seqThinking.client.callTool({
-                name: "sequentialthinking",
-                arguments: args,
-              });
-              finalProjectContext += `\n--- thinking trace ---\n${JSON.stringify(toolResult, null, 2)}`;
-            }
+        try {
+          const spentMs = Date.now() - startedAt;
+          if (hardDeadlineMs - spentMs < 18000) {
+            throw new Error("deadline reached");
           }
+          const mcpClient = await JapMcpClient.getSharedClient(workspacePath);
+          const seqThinking = await mcpClient.getSequentialThinkingTool();
+          if (seqThinking) {
+            const tools = [
+              {
+                type: "function",
+                function: {
+                  name: seqThinking.tool.name,
+                  description: seqThinking.tool.description,
+                  parameters: seqThinking.tool.inputSchema,
+                },
+              },
+            ];
 
-          deepThinkingCostMs = Date.now() - thinkingStartedAt;
+            const thinkModel = new ChatOpenAI({
+              model: modelName,
+              apiKey,
+              configuration: { baseURL: baseUrl },
+              temperature: 0.1,
+              timeout: FAST_ELICITATION_TIMEOUT_MS,
+              maxRetries: 0,
+            }).bindTools(tools);
+
+            const thinkingStartedAt = Date.now();
+            const remainingMs = Math.max(5000, hardDeadlineMs - (Date.now() - startedAt) - 2000);
+            const initialResponse = await withTimeout(
+              thinkModel.invoke([
+              new SystemMessage(DEEP_THINKING_SYSTEM_PROMPT),
+              new HumanMessage(
+                JSON.stringify({
+                  originalRequirement: requirement,
+                  refinedRequirement: context.refinedRequirement ?? "",
+                  previousRounds: context.previousRounds ?? [],
+                  answers: context.answers ?? {},
+                  projectContext: projectContextStr,
+                  skillContext,
+                }),
+              ),
+              ]),
+              remainingMs,
+              "deep thinking",
+            );
+
+            if (Array.isArray(initialResponse.tool_calls)) {
+              const firstCall = initialResponse.tool_calls[0];
+              if (firstCall && firstCall.name === "sequentialthinking") {
+                const args = isRecord(firstCall.args) ? firstCall.args : {};
+                const toolResult = await seqThinking.client.callTool({
+                  name: "sequentialthinking",
+                  arguments: args,
+                });
+                finalProjectContext += `\n--- thinking trace ---\n${JSON.stringify(toolResult, null, 2)}`;
+              }
+            }
+
+            deepThinkingCostMs = Date.now() - thinkingStartedAt;
+          }
+        } catch {
+          deepThinkingCostMs = 0;
         }
       }
+
+      finalProjectContext = clampText(finalProjectContext, 8000);
+
+      const spentBeforeModelMs = Date.now() - startedAt;
+      const remainingForStructuredMs = Math.max(8000, hardDeadlineMs - spentBeforeModelMs);
 
       const model = new ChatOpenAI({
         model: modelName,
         apiKey,
         configuration: { baseURL: baseUrl },
         temperature: 0.1,
-        timeout: FAST_ELICITATION_TIMEOUT_MS,
+        timeout: Math.min(FAST_ELICITATION_TIMEOUT_MS, remainingForStructuredMs),
         maxRetries: 0,
       });
 
@@ -333,10 +409,14 @@ export function registerElicitationRoutes(app: Express): void {
       };
 
       const structuredStartedAt = Date.now();
-      const result = await structured.invoke([
-        new SystemMessage(API_ELICITATION_PROMPT),
-        new HumanMessage(JSON.stringify(payload, null, 2)),
-      ]);
+      const result = await withTimeout(
+        structured.invoke([
+          new SystemMessage(API_ELICITATION_PROMPT),
+          new HumanMessage(JSON.stringify(payload, null, 2)),
+        ]),
+        remainingForStructuredMs,
+        "elicitation",
+      );
 
       const existingSignatures = new Set(
         (context.previousRounds ?? [])
@@ -355,7 +435,7 @@ export function registerElicitationRoutes(app: Express): void {
       const structuredCostMs = Date.now() - structuredStartedAt;
       const totalCostMs = Date.now() - startedAt;
 
-      res.json({
+      wssBroadcastElicitationResult(wss, {
         ...normalizedResult,
         meta: {
           elicitationMode,
@@ -375,7 +455,7 @@ export function registerElicitationRoutes(app: Express): void {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      res.json({
+      wssBroadcastElicitationResult(wss, {
         clarityReached: false,
         refinedRequirement: requirement,
         questionnaire: { questions: buildFallbackQuestionnaire() },
@@ -386,6 +466,7 @@ export function registerElicitationRoutes(app: Express): void {
         },
       });
     }
+    })();
   });
 
   app.post("/api/v1/elicitation/finalize", async (req, res) => {

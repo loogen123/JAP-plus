@@ -60,6 +60,7 @@ Rules:
 7. If clarityReached=true then questionnaire.questions must be an empty array.
 8. Always return refinedRequirement.
 9. Return structured result only.
+10. IMPORTANT: You MUST output all generated questions, options, and descriptions in Chinese (简体中文).
 `.trim();
 
 export const API_FINALIZE_PROMPT = `
@@ -75,7 +76,7 @@ Requirements:
 `.trim();
 
 export const DEEP_THINKING_SYSTEM_PROMPT =
-  "You are a requirements analyst. For complex requirements, call the sequentialthinking tool first, then conclude.";
+  "You are a requirements analyst. For complex requirements, call the sequentialthinking tool first, then conclude. Always output your thoughts and final conclusions in Chinese (简体中文).";
 
 export const MODELING_JSON_FALLBACK_PROMPT_SUFFIX =
   'Return a pure JSON object only with these exact keys: "01_\\u4ea7\\u54c1\\u529f\\u80fd\\u8111\\u56fe\\u4e0e\\u7528\\u4f8b.md", "02_\\u9886\\u57df\\u6a21\\u578b\\u4e0e\\u7269\\u7406\\u8868\\u7ed3\\u6784.md", "03_\\u6838\\u5fc3\\u4e1a\\u52a1\\u72b6\\u6001\\u673a.md", "04_RESTful_API\\u5951\\u7ea6.yaml".';

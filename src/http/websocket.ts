@@ -20,6 +20,17 @@ export function registerWorkflowWebSocket(server: HttpServer): WebSocketServer {
   });
 
   wss.on("connection", (socket) => {
+    socket.on("message", (msg) => {
+      try {
+        const payload = JSON.parse(msg.toString());
+        if (payload.type === "ping") {
+          socket.send(JSON.stringify({ type: "pong" }));
+        }
+      } catch {
+        // ignore invalid json
+      }
+    });
+
     socket.send(
       JSON.stringify({
         type: "LOG_ADDED",
