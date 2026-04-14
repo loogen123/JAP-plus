@@ -217,30 +217,11 @@ async function writeFinalizeDraftFiles(params: {
   const normalizedPath = path.join(draftDir, "01_prd_mcp_normalized.md");
   const inputPath = path.join(draftDir, "02_finalize_input.json");
   const finalPath = path.join(draftDir, "03_final_requirement_fused.md");
-  const rawDraftContent =
-    params.rawDraft ?? "# PRD MCP not available\n\nNo PRD draft was generated in this run.";
-  const normalizedDraftBase =
-    params.normalizedDraft ?? "# PRD MCP not available (normalized)\n\nNo normalized PRD content.";
-  const normalizedEqualsRaw = rawDraftContent.trim() === normalizedDraftBase.trim();
-  const normalizedDraftContent = normalizedEqualsRaw
-    ? [
-        "<!-- normalization-report: normalized content is semantically identical to raw draft -->",
-        "",
-        "## Normalization Report",
-        "- Result: normalized output equals raw draft after cleanup",
-        "- Reason: source draft already conforms to formatting rules",
-        "",
-        "---",
-        "",
-        normalizedDraftBase,
-      ].join("\n")
-    : normalizedDraftBase;
 
-  await writeFile(statusPath, params.mcpStatusText, "utf-8");
-  await writeFile(rawPath, rawDraftContent, "utf-8");
-  await writeFile(normalizedPath, normalizedDraftContent, "utf-8");
-  await writeFile(inputPath, JSON.stringify(params.finalizeInput, null, 2), "utf-8");
-  await writeFile(finalPath, params.finalRequirement ?? "", "utf-8");
+  // 只写入最终生成的 PRD 产物，舍弃冗余的中间态文件
+  if (params.finalRequirement) {
+    await writeFile(finalPath, params.finalRequirement, "utf-8");
+  }
 
   return { runId, statusPath, rawPath, normalizedPath, inputPath, finalPath };
 }

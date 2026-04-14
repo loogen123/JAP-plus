@@ -439,8 +439,6 @@ type FileRunMeta = {
 type FileRunRuntimePaths = {
   runDir: string;
   metaPath: string;
-  filesDir: string;
-  reviewsDir: string;
   eventsPath: string;
 };
 
@@ -475,8 +473,6 @@ function getRunPaths(workspacePath: string, runId: string): FileRunRuntimePaths 
   return {
     runDir,
     metaPath: ensureInsideWorkspace(runDir, path.join(runDir, "meta.json")),
-    filesDir: ensureInsideWorkspace(runDir, path.join(runDir, "files")),
-    reviewsDir: ensureInsideWorkspace(runDir, path.join(runDir, "reviews")),
     eventsPath: ensureInsideWorkspace(runDir, path.join(runDir, "events.log")),
   };
 }
@@ -629,15 +625,14 @@ async function loadApprovedArtifactSummary(meta: FileRunMeta): Promise<string> {
 
 async function ensureRunDirectories(workspacePath: string, runId: string): Promise<FileRunRuntimePaths> {
   const paths = getRunPaths(workspacePath, runId);
-  await fs.mkdir(paths.filesDir, { recursive: true });
-  await fs.mkdir(paths.reviewsDir, { recursive: true });
+  await fs.mkdir(paths.runDir, { recursive: true });
   return paths;
 }
 
 function toRunFilePath(workspacePath: string, runId: string, fileId: FileId): string {
   const spec = getFileSpec(fileId);
   const paths = getRunPaths(workspacePath, runId);
-  return ensureInsideWorkspace(paths.filesDir, path.join(paths.filesDir, `${fileId}.${spec.ext}`));
+  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, spec.artifactName));
 }
 
 async function readMeta(workspacePath: string, runId: string): Promise<FileRunMeta> {
@@ -705,28 +700,7 @@ function upsertFileState(meta: FileRunMeta, fileId: FileId, patch: Partial<FileR
   };
 }
 
-async function writeReviewRecord(
-  workspacePath: string,
-  runId: string,
-  fileId: FileId,
-  action: "APPROVED" | "REJECTED" | "GENERATED" | "EDITED",
-  detail: string,
-): Promise<void> {
-  const paths = getRunPaths(workspacePath, runId);
-  await fs.mkdir(paths.reviewsDir, { recursive: true });
-  const filePath = ensureInsideWorkspace(
-    paths.reviewsDir,
-    path.join(paths.reviewsDir, `${fileId}.review.json`),
-  );
-  const payload = {
-    runId,
-    fileId,
-    action,
-    detail,
-    at: nowIso(),
-  };
-  await fs.appendFile(filePath, JSON.stringify(payload) + "\n", "utf-8");
-}
+
 
 function buildQASnapshot(meta: FileRunMeta): string {
   const questions = meta.questionnaire?.questions ?? [];
@@ -987,11 +961,6 @@ async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRunMeta> 
     try {
       const generated = await runSingleFileGeneration(meta, fileId, attempt);
       await writeFileBody(meta.workspacePath, meta.runId, fileId, generated.content);
-      
-      const spec = getFileSpec(fileId);
-      const paths = getRunPaths(meta.workspacePath, meta.runId);
-      const mirrorPath = ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, spec.artifactName));
-      await fs.writeFile(mirrorPath, generated.content, "utf-8");
 
       const nextStatus: FileRunStatus = "GENERATED";
       upsertFileState(meta, fileId, {
@@ -1291,7 +1260,6 @@ export function registerTaskRoutes(app: Express): void {
       meta.stage = deriveStageFromCurrentFile(nextFile);
       meta.status = nextFile ? "RUNNING" : "DONE";
       await saveMeta(meta);
-      await writeReviewRecord(workspacePath, runId, fileId, "APPROVED", "approved by user");
       emitTaskScopedEvent(runId, "FILE_APPROVED", { runId, fileId, status: "APPROVED" });
       emitTaskScopedEvent(runId, "RUN_POINTER_MOVED", { runId, stage: meta.stage, currentFile: meta.currentFile });
       await appendEventLog(workspacePath, runId, "FILE_APPROVED", { fileId });
@@ -1327,7 +1295,6 @@ export function registerTaskRoutes(app: Express): void {
         lastError: reason,
       });
       await saveMeta(meta);
-      await writeReviewRecord(workspacePath, runId, fileId, "REJECTED", reason);
       emitTaskScopedEvent(runId, "FILE_REJECTED", { runId, fileId, status: "REJECTED", reason });
       await appendEventLog(workspacePath, runId, "FILE_REJECTED", { fileId, reason });
       res.json(toFileStatusResponse(meta, workspacePath));
@@ -1375,14 +1342,9 @@ export function registerTaskRoutes(app: Express): void {
         return;
       }
       await writeFileBody(workspacePath, runId, fileId, content);
-      const spec = getFileSpec(fileId);
-      const paths = getRunPaths(workspacePath, runId);
-      const mirrorPath = ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, spec.artifactName));
-      await fs.writeFile(mirrorPath, content, "utf-8");
 
       upsertFileState(meta, fileId, { status: "GENERATED", lastError: null });
       await saveMeta(meta);
-      await writeReviewRecord(workspacePath, runId, fileId, "EDITED", "manual edit saved");
       await appendEventLog(workspacePath, runId, "FILE_EDIT_SAVED", { fileId });
       res.json(toFileStatusResponse(meta, workspacePath));
     } catch (error) {
