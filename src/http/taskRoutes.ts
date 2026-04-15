@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { WebSocketServer } from "ws";
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
@@ -1075,7 +1076,16 @@ async function createFilewiseRun(params: {
   return meta;
 }
 
-export function registerTaskRoutes(app: Express): void {
+function wssBroadcastTaskEvent(wss: WebSocketServer, runId: string, eventType: string, payload: any) {
+  const msg = JSON.stringify({ type: `task-${eventType}`, runId, payload });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(msg);
+    }
+  });
+}
+
+export function registerTaskRoutes(app: Express, wss: WebSocketServer): void {
   app.get("/api/v1/history/requirements", async (req, res) => {
     const queryWorkspacePath = typeof req.query.workspacePath === "string" ? req.query.workspacePath : "";
     const workspacePath = resolveWorkspacePath(queryWorkspacePath);
