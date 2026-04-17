@@ -13,6 +13,7 @@ export const ARTIFACT_FILES = {
   detailing05: "05_\u884c\u4e3a\u9a71\u52a8\u9a8c\u6536\u6d4b\u8bd5.md",
   detailing06: "06_UI\u539f\u578b\u4e0e\u4ea4\u4e92\u8349\u56fe.html",
   detailing07: "07_API\u8c03\u8bd5\u96c6\u5408.json",
+  sdd08: "08_SDD_\u8f6f\u4ef6\u8bbe\u8ba1\u8bf4\u660e\u4e66.md",
 } as const;
 
 export const MODELING_ARTIFACT_KEYS = [

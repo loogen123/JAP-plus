@@ -1,0 +1,1281 @@
+import type { Express } from "express";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { WebSocketServer } from "ws";
+
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { ChatOpenAI } from "@langchain/openai";
+
+import { ARTIFACT_FILES } from "../constants/domainConstants.js";
+
+import {
+  DETAILING_NODE_SYSTEM_PROMPT,
+  MODELING_NODE_SYSTEM_PROMPT,
+  REVIEW_NODE_SYSTEM_PROMPT,
+  SDD_GATE_SYSTEM_PROMPT,
+  SDD_NODE_SYSTEM_PROMPT,
+} from "../constants/promptTexts.js";
+import {
+  emitLogAdded,
+  emitTaskScopedEvent,
+} from "../runtime/workflowEvents.js";
+import { loadSkillContext } from "../runtime/skillContext.js";
+import {
+  QuestionnaireSchema,
+  type JapState,
+} from "../state/japState.js";
+import { SddConstraintsSchema, type SddConstraints } from "../state/sddConstraints.js";
+import { SddGateValidationSchema, type SddGateValidation } from "../state/sddGate.js";
+import { invokeStructuredWithJsonFallback } from "./structuredOutputFallback.js";
+import { JapMcpClient } from "../tools/mcpClient.js";
+
+
+export type LlmConfig = NonNullable<JapState["llmConfig"]>;
+export type WorkspaceConfig = NonNullable<JapState["workspaceConfig"]>;
+export type HistoryType = "task" | "draft";
+
+export type HistoryFileSet = {
+  raw: string | null;
+  normalized: string | null;
+  final: string | null;
+};
+
+export type HistoryRecord = {
+  id: string;
+  type: HistoryType;
+  createdAt: string;
+  createdAtMs: number;
+  absoluteRoot: string;
+  absolutePaths: HistoryFileSet;
+  paths: {
+    root: string;
+    raw: string | null;
+    normalized: string | null;
+    final: string | null;
+  };
+  summary: string;
+  requirementAvailable: boolean;
+};
+
+export function normalizeQuestionnaire(input: unknown): JapState["questionnaire"] {
+  if (input == null) {
+    return null;
+  }
+  const normalized = Array.isArray(input) ? { questions: input } : input;
+  const parsed = QuestionnaireSchema.safeParse(normalized);
+  if (parsed.success) {
+    return parsed.data;
+  }
+  return null;
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+export function isStringRecord(value: unknown): value is Record<string, string> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return Object.values(value).every((item) => typeof item === "string");
+}
+
+export function isStringOrStringArrayRecord(
+  value: unknown,
+): value is Record<string, string | string[]> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return Object.values(value).every((item) => {
+    if (typeof item === "string") {
+      return true;
+    }
+    return Array.isArray(item) && item.every((v) => typeof v === "string");
+  });
+}
+
+export function isLlmConfig(value: unknown): value is LlmConfig {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.baseUrl === "string" &&
+    typeof value.apiKey === "string" &&
+    typeof value.modelName === "string"
+  );
+}
+
+export function isWorkspaceConfig(value: unknown): value is WorkspaceConfig {
+  return isRecord(value) && typeof value.path === "string";
+}
+
+export function resolveWorkspacePath(input: unknown): string {
+  if (typeof input === "string" && input.trim()) {
+    return path.resolve(input.trim());
+  }
+  if (isWorkspaceConfig(input) && input.path.trim()) {
+    return path.resolve(input.path.trim());
+  }
+  return path.resolve(process.cwd());
+}
+
+export function resolveOutputPath(input: unknown): string {
+  if (isWorkspaceConfig(input) && input.path.trim()) {
+    return path.resolve(input.path.trim());
+  }
+  return path.resolve(process.cwd(), "output");
+}
+
+export async function ensureOutputDirectoryWritable(outputDir: string): Promise<void> {
+  await fs.mkdir(outputDir, { recursive: true });
+  const probeFile = path.join(outputDir, `.jap-probe-${randomUUID()}.tmp`);
+  await fs.writeFile(probeFile, "ok", "utf-8");
+  await fs.unlink(probeFile);
+}
+
+export function isInsideWorkspace(workspacePath: string, targetPath: string): boolean {
+  const relative = path.relative(workspacePath, targetPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export function ensureInsideWorkspace(workspacePath: string, targetPath: string): string {
+  const resolved = path.resolve(targetPath);
+  if (!isInsideWorkspace(workspacePath, resolved)) {
+    throw new Error("Path is outside workspace.");
+  }
+  return resolved;
+}
+
+export function toWorkspaceRelativePath(workspacePath: string, targetPath: string): string {
+  const relative = path.relative(workspacePath, targetPath);
+  return relative.split(path.sep).join("/");
+}
+
+export async function listDirectoryNames(dirPath: string): Promise<string[]> {
+  try {
+    const items = await fs.readdir(dirPath, { withFileTypes: true });
+    return items.filter((item) => item.isDirectory()).map((item) => item.name);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function listFileNames(dirPath: string): Promise<string[]> {
+  try {
+    const items = await fs.readdir(dirPath, { withFileTypes: true });
+    return items.filter((item) => item.isFile()).map((item) => item.name);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export function pickHistoryFile(
+  dirPath: string,
+  fileNames: string[],
+  exactCandidates: string[],
+  keywordCandidates: string[],
+): string | null {
+  const lowerToRaw = new Map(fileNames.map((name) => [name.toLowerCase(), name]));
+  for (const exact of exactCandidates) {
+    const matched = lowerToRaw.get(exact.toLowerCase());
+    if (matched) {
+      return path.join(dirPath, matched);
+    }
+  }
+  const fuzzy = fileNames.find((name) => {
+    const lowered = name.toLowerCase();
+    return keywordCandidates.every((keyword) => lowered.includes(keyword));
+  });
+  return fuzzy ? path.join(dirPath, fuzzy) : null;
+}
+
+export async function getHistoryFileSet(workspacePath: string, historyDirPath: string): Promise<HistoryFileSet> {
+  const fileNames = await listFileNames(historyDirPath);
+  const rawPath = pickHistoryFile(
+    historyDirPath,
+    fileNames,
+    ["00_prd_mcp_raw.md", "raw_requirement.md", "requirement_raw.md"],
+    ["raw"],
+  );
+  const normalizedPath = pickHistoryFile(
+    historyDirPath,
+    fileNames,
+    ["01_prd_mcp_normalized.md", "normalized_requirement.md", "requirement_normalized.md"],
+    ["normalized"],
+  );
+  const finalPath = pickHistoryFile(
+    historyDirPath,
+    fileNames,
+    ["03_final_requirement_fused.md", "final_requirement_fused.md", "final_requirement.md"],
+    ["final", "requirement"],
+  );
+  return {
+    raw: rawPath ? ensureInsideWorkspace(workspacePath, rawPath) : null,
+    normalized: normalizedPath ? ensureInsideWorkspace(workspacePath, normalizedPath) : null,
+    final: finalPath ? ensureInsideWorkspace(workspacePath, finalPath) : null,
+  };
+}
+
+export async function readPreview(filePath: string | null, maxChars: number): Promise<{
+  exists: boolean;
+  path: string | null;
+  size: number;
+  truncated: boolean;
+  content: string;
+}> {
+  if (!filePath) {
+    return {
+      exists: false,
+      path: null,
+      size: 0,
+      truncated: false,
+      content: "",
+    };
+  }
+  const stat = await fs.stat(filePath);
+  const content = await fs.readFile(filePath, "utf-8");
+  const truncated = content.length > maxChars;
+  return {
+    exists: true,
+    path: filePath,
+    size: stat.size,
+    truncated,
+    content: truncated ? content.slice(0, maxChars) : content,
+  };
+}
+
+export function cleanupSummaryText(input: string): string {
+  return input.replace(/\s+/g, " ").trim();
+}
+
+export async function buildHistoryRecord(
+  workspacePath: string,
+  id: string,
+  type: HistoryType,
+  absoluteRoot: string,
+): Promise<HistoryRecord> {
+  const stat = await fs.stat(absoluteRoot);
+  const fileSet = await getHistoryFileSet(workspacePath, absoluteRoot);
+  let summary = "";
+  for (const currentPath of [fileSet.final, fileSet.normalized, fileSet.raw]) {
+    const preview = await readPreview(currentPath, 400);
+    const candidate = cleanupSummaryText(preview.content).slice(0, 180);
+    if (candidate) {
+      summary = candidate;
+      break;
+    }
+  }
+  return {
+    id,
+    type,
+    createdAt: new Date(stat.birthtimeMs || stat.mtimeMs).toISOString(),
+    createdAtMs: stat.birthtimeMs || stat.mtimeMs,
+    absoluteRoot,
+    absolutePaths: fileSet,
+    paths: {
+      root: toWorkspaceRelativePath(workspacePath, absoluteRoot),
+      raw: fileSet.raw ? toWorkspaceRelativePath(workspacePath, fileSet.raw) : null,
+      normalized: fileSet.normalized ? toWorkspaceRelativePath(workspacePath, fileSet.normalized) : null,
+      final: fileSet.final ? toWorkspaceRelativePath(workspacePath, fileSet.final) : null,
+    },
+    summary,
+    requirementAvailable: Boolean(fileSet.final || fileSet.normalized || fileSet.raw),
+  };
+}
+
+export async function listHistoryRecords(workspacePath: string): Promise<HistoryRecord[]> {
+  const tasksDir = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks"));
+  const draftsDir = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "_draft"));
+  const taskNames = await listDirectoryNames(tasksDir);
+  const draftNames = await listDirectoryNames(draftsDir);
+
+  const records = await Promise.all([
+    ...taskNames.map((name) =>
+      buildHistoryRecord(workspacePath, name, "task", ensureInsideWorkspace(tasksDir, path.join(tasksDir, name))),
+    ),
+    ...draftNames.map((name) =>
+      buildHistoryRecord(workspacePath, name, "draft", ensureInsideWorkspace(draftsDir, path.join(draftsDir, name))),
+    ),
+  ]);
+
+  return records.sort((a, b) => b.createdAtMs - a.createdAtMs);
+}
+
+export async function resolveHistoryRecord(
+  workspacePath: string,
+  id: string,
+  typeHint?: HistoryType,
+): Promise<HistoryRecord | null> {
+  const typeCandidates: HistoryType[] = typeHint ? [typeHint] : ["task", "draft"];
+  for (const type of typeCandidates) {
+    const baseDir = type === "task" ? path.join(workspacePath, "tasks") : path.join(workspacePath, "_draft");
+    const safeBaseDir = ensureInsideWorkspace(workspacePath, baseDir);
+    const candidateDir = ensureInsideWorkspace(safeBaseDir, path.join(safeBaseDir, id));
+    try {
+      const stat = await fs.stat(candidateDir);
+      if (!stat.isDirectory()) {
+        continue;
+      }
+      return await buildHistoryRecord(workspacePath, id, type, candidateDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+  }
+  return null;
+}
+
+export async function readRequirementText(filePath: string): Promise<string> {
+  const stat = await fs.stat(filePath);
+  if (stat.size > 2 * 1024 * 1024) {
+    throw new Error("Requirement file is too large.");
+  }
+  return fs.readFile(filePath, "utf-8");
+}
+
+export async function resolveRequirementFromRecord(record: HistoryRecord): Promise<{
+  source: "final" | "normalized" | "raw";
+  path: string;
+  text: string;
+} | null> {
+  const candidates: Array<{ source: "final" | "normalized" | "raw"; path: string | null }> = [
+    { source: "final", path: record.absolutePaths.final },
+    { source: "normalized", path: record.absolutePaths.normalized },
+    { source: "raw", path: record.absolutePaths.raw },
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate.path) {
+      continue;
+    }
+    const text = (await readRequirementText(candidate.path)).trim();
+    if (text) {
+      return {
+        source: candidate.source,
+        path: candidate.path,
+        text,
+      };
+    }
+  }
+  return null;
+}
+
+
+
+export type FileRunStatus = "PENDING" | "GENERATING" | "GENERATED" | "REVIEWING" | "APPROVED" | "REJECTED" | "FAILED";
+export type FileRunStage = "MODELING" | "REVIEW" | "DETAILING" | "DONE";
+export type FileRunMode = "legacy" | "filewise";
+
+const FILEWISE_STATUS_ORDER = ["01", "02", "03", "04", "05", "06", "07", "08"] as const;
+export type FileId = (typeof FILEWISE_STATUS_ORDER)[number];
+export type ArtifactFileId = FileId;
+
+export type FileSpec = {
+  fileId: FileId;
+  stage: Exclude<FileRunStage, "DONE">;
+  artifactName: string;
+  ext: "md" | "yaml" | "html" | "json";
+};
+
+const FILE_SPECS: ReadonlyArray<FileSpec> = [
+  { fileId: "01", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling01, ext: "md" },
+  { fileId: "02", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling02, ext: "md" },
+  { fileId: "03", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling03, ext: "md" },
+  { fileId: "04", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling04, ext: "yaml" },
+  { fileId: "05", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing05, ext: "md" },
+  { fileId: "06", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing06, ext: "html" },
+  { fileId: "07", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing07, ext: "json" },
+  { fileId: "08", stage: "DETAILING", artifactName: ARTIFACT_FILES.sdd08, ext: "md" },
+];
+
+const MODELING_FILE_IDS: ArtifactFileId[] = ["01", "02", "03", "04"];
+const DETAILING_FILE_IDS: ArtifactFileId[] = ["05", "06", "07", "08"];
+const FILEWISE_CONTEXT_LIMIT = 10000;
+const FILEWISE_OUTPUT_LIMIT = 16000;
+
+
+const FILE_TO_ARTIFACT_KEY: Record<ArtifactFileId, string> = {
+  "01": ARTIFACT_FILES.modeling01,
+  "02": ARTIFACT_FILES.modeling02,
+  "03": ARTIFACT_FILES.modeling03,
+  "04": ARTIFACT_FILES.modeling04,
+  "05": ARTIFACT_FILES.detailing05,
+  "06": ARTIFACT_FILES.detailing06,
+  "07": ARTIFACT_FILES.detailing07,
+  "08": ARTIFACT_FILES.sdd08,
+};
+
+export type FileRunFileState = {
+  fileId: FileId;
+  artifactName: string;
+  status: FileRunStatus;
+  retries: number;
+  lastError: string | null;
+  usedMcp: boolean;
+  toolName: string | null;
+  fallbackReason: string | null;
+  updatedAt: string;
+};
+
+export type FileRunMeta = {
+  runId: string;
+  workflowMode: FileRunMode;
+  stage: FileRunStage;
+  currentFile: FileId | null;
+  requirement: string;
+  questionnaire: JapState["questionnaire"];
+  userAnswers: Record<string, string | string[]>;
+  llm: LlmConfig;
+  workspacePath: string;
+  status: "RUNNING" | "DONE" | "FAILED";
+  files: FileRunFileState[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+
+
+export type FileRunRuntimePaths = {
+  runDir: string;
+  metaPath: string;
+  eventsPath: string;
+};
+
+export type FileRuntimeRecord = {
+  runId: string;
+  stage: FileRunStage;
+  currentFile: FileId | null;
+  files: FileRunFileState[];
+  actions: {
+    canGenerateNext: boolean;
+    canApprove: boolean;
+    canReject: boolean;
+    canRegenerate: boolean;
+    canSaveEdit: boolean;
+  };
+};
+
+export function nowIso(): string {
+  return new Date().toISOString();
+}
+
+export function getFileSpec(fileId: FileId): FileSpec {
+  const spec = FILE_SPECS.find((item) => item.fileId === fileId);
+  if (!spec) {
+    throw new Error(`Unknown fileId: ${fileId}`);
+  }
+  return spec;
+}
+
+export function getRunPaths(workspacePath: string, runId: string): FileRunRuntimePaths {
+  const runDir = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks", runId));
+  return {
+    runDir,
+    metaPath: ensureInsideWorkspace(runDir, path.join(runDir, "meta.json")),
+    eventsPath: ensureInsideWorkspace(runDir, path.join(runDir, "events.log")),
+  };
+}
+
+export async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf-8");
+}
+
+export async function appendEventLog(workspacePath: string, runId: string, type: string, data: Record<string, unknown>): Promise<void> {
+  const paths = getRunPaths(workspacePath, runId);
+  await fs.mkdir(paths.runDir, { recursive: true });
+  await fs.appendFile(
+    paths.eventsPath,
+    JSON.stringify({ at: nowIso(), runId, type, ...data }) + "\n",
+    "utf-8",
+  );
+}
+
+export function deriveStageFromCurrentFile(fileId: FileId | null): FileRunStage {
+  if (!fileId) {
+    return "DONE";
+  }
+  return ["05", "06", "07", "08"].includes(fileId) ? "DETAILING" : "MODELING";
+}
+
+export function resolveCurrentFile(files: FileRunFileState[]): FileId | null {
+  for (const id of FILEWISE_STATUS_ORDER) {
+    const found = files.find((item) => item.fileId === id);
+    if (found && found.status !== "APPROVED") {
+      return id;
+    }
+  }
+  return null;
+}
+
+export function getFileRuntimeRecord(meta: FileRunMeta): FileRuntimeRecord {
+  const current = meta.currentFile ? meta.files.find((item) => item.fileId === meta.currentFile) ?? null : null;
+  const currentStatus = current?.status ?? null;
+  const sddPrerequisitesReady =
+    meta.currentFile !== "08" ||
+    meta.files.filter((item) => item.fileId !== "08").every((item) => item.status === "APPROVED");
+  const baseCanGenerateNext = currentStatus === "PENDING" || currentStatus === "FAILED" || currentStatus === "REJECTED";
+  return {
+    runId: meta.runId,
+    stage: meta.stage,
+    currentFile: meta.currentFile,
+    files: meta.files,
+    actions: {
+      canGenerateNext: baseCanGenerateNext && sddPrerequisitesReady,
+      canApprove: currentStatus === "GENERATED" || currentStatus === "REVIEWING",
+      canReject: currentStatus === "GENERATED" || currentStatus === "REVIEWING",
+      canRegenerate: currentStatus !== null && currentStatus !== "GENERATING",
+      canSaveEdit:
+        currentStatus === "GENERATED" ||
+        currentStatus === "REVIEWING" ||
+        currentStatus === "REJECTED" ||
+        currentStatus === "FAILED",
+    },
+  };
+}
+
+export function toFileStatusResponse(meta: FileRunMeta, workspacePath: string): Record<string, unknown> {
+  return {
+    runId: meta.runId,
+    workflowMode: meta.workflowMode,
+    status: meta.status,
+    stage: meta.stage,
+    currentFile: meta.currentFile,
+    workspacePath,
+    files: meta.files,
+    actions: getFileRuntimeRecord(meta).actions,
+  };
+}
+
+export function createInitialFileStates(): FileRunFileState[] {
+  const now = nowIso();
+  return FILE_SPECS.map((spec) => ({
+    fileId: spec.fileId,
+    artifactName: spec.artifactName,
+    status: "PENDING",
+    retries: 0,
+    lastError: null,
+    usedMcp: false,
+    toolName: null,
+    fallbackReason: null,
+    updatedAt: now,
+  }));
+}
+
+export function ensureValidFileId(value: string): FileId {
+  if (FILEWISE_STATUS_ORDER.includes(value as FileId)) {
+    return value as FileId;
+  }
+  throw new Error("invalid fileId");
+}
+
+export function splitRequirementBySections(requirement: string): string[] {
+  const normalized = requirement.trim();
+  if (!normalized) {
+    return [];
+  }
+  const chunks = normalized
+    .split(/\n(?=#{1,3}\s)|\n{2,}/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (chunks.length <= 1) {
+    return [normalized.slice(0, FILEWISE_CONTEXT_LIMIT)];
+  }
+  const merged: string[] = [];
+  let bucket = "";
+  for (const chunk of chunks) {
+    if ((bucket + "\n\n" + chunk).length > FILEWISE_CONTEXT_LIMIT && bucket) {
+      merged.push(bucket);
+      bucket = chunk;
+    } else {
+      bucket = bucket ? `${bucket}\n\n${chunk}` : chunk;
+    }
+  }
+  if (bucket) {
+    merged.push(bucket);
+  }
+  return merged.slice(0, 6);
+}
+
+export function clampText(input: string, maxChars: number): string {
+  if (input.length <= maxChars) {
+    return input;
+  }
+  return `${input.slice(0, maxChars)}\n\n[truncated]`;
+}
+
+export function summarizeText(input: string): string {
+  const cleaned = input.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= 240) {
+    return cleaned;
+  }
+  return `${cleaned.slice(0, 140)} ... ${cleaned.slice(-80)}`;
+}
+
+export async function loadApprovedArtifactSummary(meta: FileRunMeta): Promise<string> {
+  const records: string[] = [];
+  for (const file of meta.files) {
+    if (file.status !== "APPROVED") {
+      continue;
+    }
+    const content = await readFileBody(meta.workspacePath, meta.runId, file.fileId);
+    if (!content.trim()) {
+      continue;
+    }
+    records.push(`${file.fileId} ${file.artifactName}: ${summarizeText(content)}`);
+  }
+  return records.join("\n");
+}
+
+export async function ensureRunDirectories(workspacePath: string, runId: string): Promise<FileRunRuntimePaths> {
+  const paths = getRunPaths(workspacePath, runId);
+  await fs.mkdir(paths.runDir, { recursive: true });
+  return paths;
+}
+
+export function toRunFilePath(workspacePath: string, runId: string, fileId: FileId): string {
+  const spec = getFileSpec(fileId);
+  const paths = getRunPaths(workspacePath, runId);
+  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, spec.artifactName));
+}
+
+export async function readMeta(workspacePath: string, runId: string): Promise<FileRunMeta> {
+  const paths = getRunPaths(workspacePath, runId);
+  const raw = await fs.readFile(paths.metaPath, "utf-8");
+  const parsed = JSON.parse(raw) as FileRunMeta;
+  if (!parsed.runId || !Array.isArray(parsed.files)) {
+    throw new Error("invalid run meta");
+  }
+  parsed.currentFile = resolveCurrentFile(parsed.files);
+  parsed.stage = deriveStageFromCurrentFile(parsed.currentFile);
+  if (!parsed.currentFile) {
+    parsed.status = "DONE";
+  }
+  return parsed;
+}
+
+export async function saveMeta(meta: FileRunMeta): Promise<void> {
+  const paths = await ensureRunDirectories(meta.workspacePath, meta.runId);
+  meta.currentFile = resolveCurrentFile(meta.files);
+  meta.stage = deriveStageFromCurrentFile(meta.currentFile);
+  if (!meta.currentFile) {
+    meta.status = "DONE";
+  }
+  meta.updatedAt = nowIso();
+  await writeJson(paths.metaPath, meta);
+}
+
+export async function writeFileBody(
+  workspacePath: string,
+  runId: string,
+  fileId: FileId,
+  content: string,
+): Promise<string> {
+  const filePath = toRunFilePath(workspacePath, runId, fileId);
+  await fs.writeFile(filePath, content, "utf-8");
+  return filePath;
+}
+
+export async function readFileBody(workspacePath: string, runId: string, fileId: FileId): Promise<string> {
+  const filePath = toRunFilePath(workspacePath, runId, fileId);
+  try {
+    return await fs.readFile(filePath, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+export function upsertFileState(meta: FileRunMeta, fileId: FileId, patch: Partial<FileRunFileState>): void {
+  const idx = meta.files.findIndex((item) => item.fileId === fileId);
+  if (idx < 0) {
+    throw new Error(`file state not found: ${fileId}`);
+  }
+  const existing = meta.files[idx];
+  if (!existing) {
+    throw new Error(`file state not found: ${fileId}`);
+  }
+  meta.files[idx] = {
+    ...existing,
+    ...patch,
+    updatedAt: nowIso(),
+  };
+}
+
+
+
+export function buildQASnapshot(meta: FileRunMeta): string {
+  const questions = meta.questionnaire?.questions ?? [];
+  return questions
+    .slice(0, 30)
+    .map((q) => {
+      const answer = meta.userAnswers[q.id];
+      const answerText = Array.isArray(answer) ? answer.join(" | ") : String(answer ?? "");
+      return `Q:${q.questionText}\nA:${answerText || "N/A"}`;
+    })
+    .join("\n---\n");
+}
+
+
+
+export function createModel(meta: FileRunMeta, timeout: number): ChatOpenAI {
+  return new ChatOpenAI({
+    model: meta.llm.modelName || "deepseek-chat",
+    apiKey: meta.llm.apiKey,
+    configuration: {
+      baseURL: meta.llm.baseUrl || "https://api.deepseek.com",
+    },
+    temperature: 0.1,
+    timeout,
+    maxRetries: 0,
+  });
+}
+
+export function buildModelingPrompt(fileId: ArtifactFileId, requirement: string, approvedSummary: string, qa: string, skill: string): string {
+  return [
+    `Target file: ${FILE_TO_ARTIFACT_KEY[fileId]}`,
+    "Requirement:",
+    clampText(requirement, FILEWISE_CONTEXT_LIMIT),
+    "",
+    "Approved file summaries:",
+    approvedSummary || "(none)",
+    "",
+    "Question and answer snapshot:",
+    clampText(qa, 3000),
+    "",
+    "Constraints:",
+    "Keep naming consistent with existing artifacts.",
+    "Output complete file content for target only.",
+    "",
+    "Skill context:",
+    clampText(skill, 2000),
+  ].join("\n");
+}
+
+export function buildDetailingPrompt(fileId: ArtifactFileId, requirement: string, approvedSummary: string, skill: string): string {
+  return [
+    `Target file: ${FILE_TO_ARTIFACT_KEY[fileId]}`,
+    "Requirement:",
+    clampText(requirement, 2800),
+    "",
+    "Approved base artifact summaries:",
+    approvedSummary || "(none)",
+    "",
+    "Constraints:",
+    "05 must be Gherkin acceptance tests.",
+    "06 must be complete single-file HTML.",
+    "07 must be valid Postman Collection 2.1 JSON.",
+    "",
+    "Skill context:",
+    clampText(skill, 1800),
+  ].join("\n");
+}
+
+export function buildSddPrompt(requirement: string, approvedSummary: string, evidence: string, qa: string, skill: string): string {
+  return [
+    `Target file: ${ARTIFACT_FILES.sdd08}`,
+    "Requirement:",
+    clampText(requirement, FILEWISE_CONTEXT_LIMIT),
+    "",
+    "Intermediate artifact summaries (01-07):",
+    approvedSummary || "(none)",
+    "",
+    "Evidence blocks (01-07 content excerpts):",
+    evidence ? evidence : "(none)",
+    "",
+    "Question and answer snapshot:",
+    clampText(qa, 3000),
+    "",
+    "Constraints:",
+    "SDD must be engineering-ready and implementation-oriented.",
+    "Keep all entity/API/table/state naming consistent with intermediate artifacts.",
+    "If a detail is not determined by requirement or intermediate artifacts, use 建议/默认方案/可选项 wording and do not fabricate facts.",
+    "You MUST include the appendix JSON constraint block wrapped by markers: <!-- SDD_CONSTRAINTS_JSON_BEGIN --> and <!-- SDD_CONSTRAINTS_JSON_END -->.",
+    "",
+    "Skill context:",
+    clampText(skill, 2500),
+  ].join("\n");
+}
+
+const SDD_EVIDENCE_FILE_IDS: ReadonlyArray<FileId> = ["01", "02", "03", "04", "05", "06", "07"];
+
+const SDD_CONSTRAINTS_BEGIN = "<!-- SDD_CONSTRAINTS_JSON_BEGIN -->";
+const SDD_CONSTRAINTS_END = "<!-- SDD_CONSTRAINTS_JSON_END -->";
+
+export function extractSddConstraintsFromMarkdown(markdown: string): SddConstraints {
+  const start = markdown.indexOf(SDD_CONSTRAINTS_BEGIN);
+  const end = markdown.indexOf(SDD_CONSTRAINTS_END);
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("SDD constraints JSON block markers not found");
+  }
+  const jsonText = markdown.slice(start + SDD_CONSTRAINTS_BEGIN.length, end).trim();
+  if (!jsonText) {
+    throw new Error("SDD constraints JSON block is empty");
+  }
+  const parsed = JSON.parse(jsonText) as unknown;
+  return SddConstraintsSchema.parse(parsed);
+}
+
+function getSddConstraintsPath(workspacePath: string, runId: string): string {
+  const paths = getRunPaths(workspacePath, runId);
+  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.constraints.json"));
+}
+
+function getSddValidationPath(workspacePath: string, runId: string): string {
+  const paths = getRunPaths(workspacePath, runId);
+  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.validation.json"));
+}
+
+export async function readSddGateValidation(workspacePath: string, runId: string): Promise<SddGateValidation | null> {
+  try {
+    const raw = await fs.readFile(getSddValidationPath(workspacePath, runId), "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    const validated = SddGateValidationSchema.safeParse(parsed);
+    if (!validated.success) {
+      return null;
+    }
+    return validated.data;
+  } catch {
+    return null;
+  }
+}
+
+export async function readSddConstraints(workspacePath: string, runId: string): Promise<SddConstraints | null> {
+  try {
+    const raw = await fs.readFile(getSddConstraintsPath(workspacePath, runId), "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    const validated = SddConstraintsSchema.safeParse(parsed);
+    if (!validated.success) {
+      return null;
+    }
+    return validated.data;
+  } catch {
+    return null;
+  }
+}
+
+async function validateSddGate(meta: FileRunMeta, constraints: SddConstraints): Promise<SddGateValidation> {
+  const openapi = await readFileBody(meta.workspacePath, meta.runId, "04");
+  const domain = await readFileBody(meta.workspacePath, meta.runId, "02");
+  const model = createModel(meta, 45000);
+  const structured = model.withStructuredOutput(SddGateValidationSchema, { method: "functionCalling" });
+
+  const payload = {
+    constraints,
+    artifacts: {
+      openapi: clampText(openapi, 22000),
+      domainModel: clampText(domain, 22000),
+    },
+  };
+
+  const { result, usedFallback } = await invokeStructuredWithJsonFallback<SddGateValidation>({
+    invokeStructured: () =>
+      structured.invoke([
+        new SystemMessage(SDD_GATE_SYSTEM_PROMPT),
+        new HumanMessage(JSON.stringify(payload)),
+      ]),
+    invokeFallback: () =>
+      model.invoke([
+        new SystemMessage(SDD_GATE_SYSTEM_PROMPT),
+        new HumanMessage(JSON.stringify(payload)),
+      ]),
+    safeParse: (value) => SddGateValidationSchema.safeParse(value),
+  });
+
+  const normalized = SddGateValidationSchema.parse(result);
+  const conflicts = (normalized.conflicts ?? []).map((conflict) => ({
+    category: conflict.category ?? "other",
+    severity: conflict.severity ?? "error",
+    message: conflict.message,
+    evidence: conflict.evidence,
+    suggestion: conflict.suggestion,
+  }));
+  return {
+    ...normalized,
+    conflicts,
+    meta: {
+      ...(normalized.meta ?? {}),
+      usedFallback,
+    },
+  };
+}
+
+async function loadSddEvidence(meta: FileRunMeta): Promise<string> {
+  // SDD 作为最终交付物，需要尽可能基于 01~07 的实际产物做一致性约束；因此这里将已生成文件正文按片段注入提示词，减少模型编造与前后矛盾。
+  const maxCharsByFile: Partial<Record<FileId, number>> = {
+    "01": 2500,
+    "02": 3500,
+    "03": 3000,
+    "04": 3000,
+    "05": 2200,
+    "06": 2200,
+    "07": 2200,
+  };
+
+  const blocks: string[] = [];
+  for (const fileId of SDD_EVIDENCE_FILE_IDS) {
+    try {
+      const raw = await readFileBody(meta.workspacePath, meta.runId, fileId);
+      const text = raw.trim();
+      if (!text) continue;
+      const maxChars = maxCharsByFile[fileId] ?? 2000;
+      blocks.push(`--- ${FILE_TO_ARTIFACT_KEY[fileId]} ---\n${clampText(text, maxChars)}\n`);
+    } catch {
+      continue;
+    }
+  }
+  return blocks.join("\n");
+}
+
+
+
+export async function generateArtifactByLlm(
+  meta: FileRunMeta,
+  fileId: ArtifactFileId,
+  approvedSummary: string,
+  fallbackContextOnly: boolean,
+  minimalist: boolean = false,
+): Promise<string> {
+  const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
+  const skill = await loadSkillContext(meta.workspacePath);
+  const qa = buildQASnapshot(meta);
+  const requirement = fallbackContextOnly
+    ? clampText(meta.requirement, 6000)
+    : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
+
+  const sddEvidence = fileId === "08" ? await loadSddEvidence(meta) : "";
+
+  let extraPrompt = "";
+  if (minimalist) {
+    extraPrompt = "\nMINIMALIST MODE: Output ONLY the core structure, bullet points, and basic outlines. DO NOT include detailed explanations or long texts. Keep it as short as possible while preserving the structure.";
+  } else {
+    if (fileId === "01") {
+      extraPrompt = "\nForce output Mermaid graph TD format. Must include at least 8 core use cases' implementation specs (API sequence, data validation rules, error codes).";
+    } else if (fileId === "02") {
+      extraPrompt = "\nForce output complete MySQL DDL table creation statements, including PK, FK, indexes (uk_, idx_) and business constraints.";
+    } else if (fileId === "04") {
+      extraPrompt = "\nForce output OpenAPI 3.0 YAML specification, including $ref definitions for request/response.";
+    } else if (fileId === "06") {
+      extraPrompt = "\nForce output pure HTML content. DO NOT prefix or suffix the HTML with any markdown text or explanations. Start strictly with <!DOCTYPE html>.";
+    }
+  }
+
+  const prompt =
+    fileId === "08"
+      ? buildSddPrompt(requirement, approvedSummary, sddEvidence, qa, skill) + extraPrompt
+      : MODELING_FILE_IDS.includes(fileId)
+        ? buildModelingPrompt(fileId, requirement, approvedSummary, qa, skill) + extraPrompt
+        : buildDetailingPrompt(fileId, requirement, approvedSummary, skill) + extraPrompt;
+
+  const baseSystemPrompt = MODELING_FILE_IDS.includes(fileId)
+    ? MODELING_NODE_SYSTEM_PROMPT
+    : fileId === "08"
+      ? SDD_NODE_SYSTEM_PROMPT
+      : DETAILING_NODE_SYSTEM_PROMPT;
+
+  const systemPrompt = baseSystemPrompt + "\n\nYou are generating a single file. Output ONLY the raw markdown/yaml/html/json content. DO NOT wrap it in JSON or any code blocks. No explanations, no filler. Ensure cross-file naming consistency.";
+
+  const response = await model.invoke([
+    new SystemMessage(systemPrompt),
+    new HumanMessage(prompt),
+  ]);
+
+  let content = typeof response.content === "string" ? response.content : "";
+  
+  content = content.trim();
+  if (content.startsWith("```")) {
+    const lines = content.split("\n");
+    const firstLine = lines[0];
+    const lastLine = lines[lines.length - 1];
+    if (lines.length > 1 && firstLine && firstLine.startsWith("```")) {
+      lines.shift();
+      if (lastLine && lastLine.startsWith("```")) {
+        lines.pop();
+      }
+      content = lines.join("\n").trim();
+    }
+  }
+
+  // 针对 HTML 输出可能被 Markdown包裹的进一步清理
+  if (fileId === "06" && content.startsWith("<!DOCTYPE html>") && content.includes("```html")) {
+    content = content.replace(/```html/g, "").replace(/```/g, "").trim();
+  } else if (fileId === "06" && !content.startsWith("<!DOCTYPE html>") && content.includes("<!DOCTYPE html>")) {
+    const htmlStart = content.indexOf("<!DOCTYPE html>");
+    content = content.slice(htmlStart).replace(/```html/g, "").replace(/```/g, "").trim();
+  }
+
+  if (!content) {
+    throw new Error(`empty output for ${fileId}`);
+  }
+  return content;
+}
+
+export async function tryGenerateWithMcp(
+  meta: FileRunMeta,
+  fileId: FileId,
+  approvedSummary: string,
+): Promise<{ content: string; toolName: string } | null> {
+  try {
+    const client = await JapMcpClient.getSharedClient(meta.workspacePath);
+    const result = await client.callTextToolByCandidates(
+      [`generate_file_${fileId}`, "generate_design_file", "generate_artifact_file", "generate_artifact"],
+      {
+        fileId,
+        requirement: clampText(meta.requirement, 2800),
+        approvedSummary: clampText(approvedSummary, 2000),
+      },
+    );
+    if (!result?.content?.trim()) {
+      return null;
+    }
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId, attempt: number): Promise<{
+  content: string;
+  usedMcp: boolean;
+  toolName: string | null;
+  fallbackReason: string | null;
+}> {
+  const approvedSummary = await loadApprovedArtifactSummary(meta);
+  
+  if (attempt === 1) {
+    const mcpResult = await tryGenerateWithMcp(meta, fileId, approvedSummary);
+    if (mcpResult) {
+      return {
+        content: mcpResult.content,
+        usedMcp: true,
+        toolName: mcpResult.toolName,
+        fallbackReason: null,
+      };
+    }
+  }
+
+  const asArtifact = fileId as ArtifactFileId;
+  const isFallback = attempt >= 2;
+  const isMinimalist = attempt === 3;
+
+  try {
+    const content = await generateArtifactByLlm(
+      meta,
+      asArtifact,
+      approvedSummary,
+      isFallback,
+      isMinimalist
+    );
+    return {
+      content,
+      usedMcp: false,
+      toolName: null,
+      fallbackReason: isMinimalist ? "switched to minimalist mode" : (isFallback ? "switched to fallback context" : "MCP tool unavailable"),
+    };
+  } catch (error) {
+    const sections = splitRequirementBySections(meta.requirement);
+    if (sections.length <= 1) {
+      throw error;
+    }
+    const chunks: string[] = [];
+    for (const section of sections) {
+      const patchMeta: FileRunMeta = {
+        ...meta,
+        requirement: section,
+      };
+      const partial = await generateArtifactByLlm(patchMeta, asArtifact, approvedSummary, true, isMinimalist);
+      chunks.push(partial);
+    }
+    const combined = clampText(chunks.join("\n\n"), FILEWISE_OUTPUT_LIMIT);
+    return {
+      content: combined,
+      usedMcp: false,
+      toolName: null,
+      fallbackReason: "MCP tool unavailable; switched to section merge",
+    };
+  }
+}
+
+export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRunMeta> {
+  const fileId = meta.currentFile;
+  if (!fileId) {
+    return meta;
+  }
+  const current = meta.files.find((item) => item.fileId === fileId);
+  if (!current) {
+    throw new Error("current file record not found");
+  }
+  const retryBase = current.retries;
+  upsertFileState(meta, fileId, { status: "GENERATING", lastError: null });
+  await saveMeta(meta);
+  emitTaskScopedEvent(meta.runId, "FILE_STAGE_CHANGED", {
+    runId: meta.runId,
+    fileId,
+    status: "GENERATING",
+  });
+  emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+    logType: "INFO",
+    title: `文件 ${fileId} 开始生成`,
+    summary: `第 ${retryBase + 1} 次尝试`,
+  });
+  await appendEventLog(meta.workspacePath, meta.runId, "FILE_STAGE_CHANGED", { fileId, status: "GENERATING" });
+
+  let lastError: unknown = null;
+  for (const attempt of [1, 2, 3]) {
+    try {
+      const generated = await runSingleFileGeneration(meta, fileId, attempt);
+      await writeFileBody(meta.workspacePath, meta.runId, fileId, generated.content);
+      if (fileId === "08") {
+        const constraints = extractSddConstraintsFromMarkdown(generated.content);
+        await writeJson(getSddConstraintsPath(meta.workspacePath, meta.runId), constraints);
+        await appendEventLog(meta.workspacePath, meta.runId, "SDD_CONSTRAINTS_EXTRACTED", {
+          fileId,
+          version: constraints.version,
+          apis: constraints.apis.length,
+          tables: constraints.tables.length,
+          stateMachines: constraints.stateMachines.length,
+        });
+        const validation = await validateSddGate(meta, constraints);
+        await writeJson(getSddValidationPath(meta.workspacePath, meta.runId), validation);
+        await appendEventLog(meta.workspacePath, meta.runId, "SDD_GATE_VALIDATED", {
+          fileId,
+          passed: validation.passed,
+          conflicts: (validation.conflicts ?? []).length,
+        });
+        if (!validation.passed) {
+          const top = (validation.conflicts ?? []).slice(0, 5).map((c) => c.message).join("；");
+          throw new Error(`SDD Gate 校验未通过：${top || "存在一致性冲突"}`);
+        }
+      }
+
+      const nextStatus: FileRunStatus = "GENERATED";
+      upsertFileState(meta, fileId, {
+        status: nextStatus,
+        retries: retryBase + attempt,
+        usedMcp: generated.usedMcp,
+        toolName: generated.toolName,
+        fallbackReason: generated.fallbackReason,
+        lastError: null,
+      });
+      await saveMeta(meta);
+      emitTaskScopedEvent(meta.runId, "FILE_GENERATED", {
+        runId: meta.runId,
+        fileId,
+        status: nextStatus,
+      });
+      emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+        logType: "SUCCESS",
+        title: `文件 ${fileId} 生成成功`,
+        summary: generated.fallbackReason
+          ? `fallback=${generated.fallbackReason}`
+          : generated.usedMcp
+            ? `usedMcp=${generated.toolName || "unknown"}`
+            : "使用内置模型生成",
+      });
+      await appendEventLog(meta.workspacePath, meta.runId, "FILE_GENERATED", {
+        fileId,
+        status: nextStatus,
+        usedMcp: generated.usedMcp,
+        toolName: generated.toolName,
+        fallbackReason: generated.fallbackReason,
+      });
+      return meta;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      upsertFileState(meta, fileId, {
+        status: "FAILED",
+        retries: retryBase + attempt,
+        lastError: message,
+      });
+      await saveMeta(meta);
+      emitTaskScopedEvent(meta.runId, "FILE_STAGE_CHANGED", {
+        runId: meta.runId,
+        fileId,
+        status: "FAILED",
+        attempt,
+        error: message,
+      });
+      emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+        logType: "ERROR",
+        title: `文件 ${fileId} 生成失败(${attempt}/3)`,
+        summary: message,
+      });
+      await appendEventLog(meta.workspacePath, meta.runId, "FILE_FAILED", { fileId, attempt, message });
+      if (attempt >= 3) {
+        throw error;
+      }
+      emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+        logType: "INFO",
+        title: `文件 ${fileId} 准备重试`,
+        summary: `即将开始第 ${retryBase + attempt + 1} 次尝试`,
+      });
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("generation failed");
+}
+
+export async function createFilewiseRun(params: {
+  requirement: string;
+  llm: unknown;
+  workspace: unknown;
+  questionnaire: JapState["questionnaire"];
+  userAnswers: Record<string, string | string[]>;
+}): Promise<FileRunMeta> {
+  const workspacePath = resolveWorkspacePath(params.workspace);
+  const taskRoot = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks"));
+  await ensureOutputDirectoryWritable(taskRoot);
+  const runId = `run-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  await ensureRunDirectories(workspacePath, runId);
+  const llmRaw = isRecord(params.llm) ? params.llm : {};
+  const llm: LlmConfig = {
+    baseUrl: String(llmRaw.baseUrl || "https://api.deepseek.com"),
+    apiKey: String(llmRaw.apiKey || ""),
+    modelName: String(llmRaw.modelName || "deepseek-chat"),
+  };
+  const meta: FileRunMeta = {
+    runId,
+    workflowMode: "filewise",
+    stage: "MODELING",
+    currentFile: "01",
+    requirement: params.requirement,
+    questionnaire: params.questionnaire,
+    userAnswers: params.userAnswers,
+    llm,
+    workspacePath,
+    status: "RUNNING",
+    files: createInitialFileStates(),
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  await saveMeta(meta);
+  await appendEventLog(workspacePath, runId, "RUN_CREATED", {
+    stage: meta.stage,
+    currentFile: meta.currentFile,
+  });
+  emitTaskScopedEvent(runId, "RUN_POINTER_MOVED", {
+    runId,
+    stage: meta.stage,
+    currentFile: meta.currentFile,
+  });
+  return meta;
+}
+
+function wssBroadcastTaskEvent(wss: WebSocketServer, runId: string, eventType: string, payload: any) {
+  const msg = JSON.stringify({ type: `task-${eventType}`, runId, payload });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(msg);
+    }
+  });
+}
