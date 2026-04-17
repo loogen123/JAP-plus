@@ -464,6 +464,16 @@ export type FileRuntimeRecord = {
   };
 };
 
+export type SddSourceRunSummary = {
+  runId: string;
+  createdAt: string;
+  updatedAt: string;
+  status: FileRunMeta["status"];
+  stage: FileRunStage;
+  currentFile: FileId | null;
+  baseReady: boolean;
+};
+
 export function nowIso(): string {
   return new Date().toISOString();
 }
@@ -483,6 +493,82 @@ export function getRunPaths(workspacePath: string, runId: string): FileRunRuntim
     metaPath: ensureInsideWorkspace(runDir, path.join(runDir, "meta.json")),
     eventsPath: ensureInsideWorkspace(runDir, path.join(runDir, "events.log")),
   };
+}
+
+function isBaseFilesApproved(meta: FileRunMeta): boolean {
+  return ["01", "02", "03", "04", "05", "06", "07"].every((fileId) => {
+    const state = meta.files.find((item) => item.fileId === fileId);
+    return state?.status === "APPROVED";
+  });
+}
+
+async function isBaseFilesReadyOnDisk(meta: FileRunMeta): Promise<boolean> {
+  if (!isBaseFilesApproved(meta)) {
+    return false;
+  }
+  for (const fileId of ["01", "02", "03", "04", "05", "06", "07"] as const) {
+    const body = await readFileBody(meta.workspacePath, meta.runId, fileId);
+    if (!body.trim()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export async function listSddSourceRuns(
+  workspacePath: string,
+  currentRunId: string,
+): Promise<SddSourceRunSummary[]> {
+  const tasksDir = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks"));
+  const runIds = await listDirectoryNames(tasksDir);
+  const rows: SddSourceRunSummary[] = [];
+  for (const runId of runIds) {
+    if (!runId || runId === currentRunId) continue;
+    try {
+      const meta = await readMeta(workspacePath, runId);
+      const baseReady = await isBaseFilesReadyOnDisk(meta);
+      rows.push({
+        runId: meta.runId,
+        createdAt: meta.createdAt,
+        updatedAt: meta.updatedAt,
+        status: meta.status,
+        stage: meta.stage,
+        currentFile: meta.currentFile,
+        baseReady,
+      });
+    } catch {
+      continue;
+    }
+  }
+  return rows
+    .filter((item) => item.baseReady)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, 60);
+}
+
+export async function importBaseFilesFromRun(meta: FileRunMeta, sourceRunId: string): Promise<void> {
+  const sourceMeta = await readMeta(meta.workspacePath, sourceRunId);
+  if (!isBaseFilesApproved(sourceMeta)) {
+    throw new Error("历史任务未完成01-07审核通过，不能用于SDD生成");
+  }
+  for (const fileId of ["01", "02", "03", "04", "05", "06", "07"] as const) {
+    const body = await readFileBody(meta.workspacePath, sourceRunId, fileId);
+    if (!body.trim()) {
+      throw new Error(`历史任务 ${sourceRunId} 的文件 ${fileId} 内容为空`);
+    }
+    await writeFileBody(meta.workspacePath, meta.runId, fileId, body);
+    upsertFileState(meta, fileId, {
+      status: "APPROVED",
+      lastError: null,
+      fallbackReason: `imported-from-${sourceRunId}`,
+    });
+  }
+  upsertFileState(meta, "08", { status: "PENDING", lastError: null });
+  await saveMeta(meta);
+  await appendEventLog(meta.workspacePath, meta.runId, "SDD_SOURCE_IMPORTED", {
+    sourceRunId,
+    targetRunId: meta.runId,
+  });
 }
 
 export async function writeJson(filePath: string, value: unknown): Promise<void> {
@@ -809,21 +895,53 @@ export function buildSddPrompt(requirement: string, approvedSummary: string, evi
 
 const SDD_EVIDENCE_FILE_IDS: ReadonlyArray<FileId> = ["01", "02", "03", "04", "05", "06", "07"];
 
-const SDD_CONSTRAINTS_BEGIN = "<!-- SDD_CONSTRAINTS_JSON_BEGIN -->";
-const SDD_CONSTRAINTS_END = "<!-- SDD_CONSTRAINTS_JSON_END -->";
-
 export function extractSddConstraintsFromMarkdown(markdown: string): SddConstraints {
-  const start = markdown.indexOf(SDD_CONSTRAINTS_BEGIN);
-  const end = markdown.indexOf(SDD_CONSTRAINTS_END);
-  if (start < 0 || end < 0 || end <= start) {
+  const markerMatch = markdown.match(
+    /<!--\s*SDD_CONSTRAINTS_JSON_BEGIN\s*-->([\s\S]*?)<!--\s*SDD_CONSTRAINTS_JSON_END\s*-->/i,
+  );
+  if (!markerMatch) {
     throw new Error("SDD constraints JSON block markers not found");
   }
-  const jsonText = markdown.slice(start + SDD_CONSTRAINTS_BEGIN.length, end).trim();
+  let jsonText = markerMatch[1]?.trim() ?? "";
+  jsonText = jsonText.replace(/^```[a-zA-Z]*\s*/, "").replace(/\s*```$/, "").trim();
   if (!jsonText) {
     throw new Error("SDD constraints JSON block is empty");
   }
   const parsed = JSON.parse(jsonText) as unknown;
   return SddConstraintsSchema.parse(parsed);
+}
+
+async function recoverSddConstraintsByLlm(
+  meta: FileRunMeta,
+  markdown: string,
+  parseError: unknown,
+): Promise<SddConstraints> {
+  const model = createModel(meta, 45000);
+  const structured = model.withStructuredOutput(SddConstraintsSchema, { method: "functionCalling" });
+  const payload = {
+    parseError: parseError instanceof Error ? parseError.message : String(parseError),
+    markdown: clampText(markdown, 26000),
+  };
+  const { result } = await invokeStructuredWithJsonFallback<SddConstraints>({
+    invokeStructured: async () =>
+      SddConstraintsSchema.parse(
+        await structured.invoke([
+          new SystemMessage(
+            "从给定的SDD markdown中提取并重建约束JSON。只返回符合schema的结构化结果，不要解释。",
+          ),
+          new HumanMessage(JSON.stringify(payload)),
+        ]),
+      ),
+    invokeFallback: () =>
+      model.invoke([
+        new SystemMessage(
+          "从给定的SDD markdown中提取并重建约束JSON。返回纯JSON对象，字段必须包含version/apis/tables/stateMachines。",
+        ),
+        new HumanMessage(JSON.stringify(payload)),
+      ]),
+    safeParse: (value) => SddConstraintsSchema.safeParse(value),
+  });
+  return SddConstraintsSchema.parse(result);
 }
 
 function getSddConstraintsPath(workspacePath: string, runId: string): string {
@@ -867,6 +985,7 @@ export async function readSddConstraints(workspacePath: string, runId: string): 
 async function validateSddGate(meta: FileRunMeta, constraints: SddConstraints): Promise<SddGateValidation> {
   const openapi = await readFileBody(meta.workspacePath, meta.runId, "04");
   const domain = await readFileBody(meta.workspacePath, meta.runId, "02");
+  const stateMachine = await readFileBody(meta.workspacePath, meta.runId, "03");
   const model = createModel(meta, 45000);
   const structured = model.withStructuredOutput(SddGateValidationSchema, { method: "functionCalling" });
 
@@ -875,6 +994,7 @@ async function validateSddGate(meta: FileRunMeta, constraints: SddConstraints): 
     artifacts: {
       openapi: clampText(openapi, 22000),
       domainModel: clampText(domain, 22000),
+      stateMachine: clampText(stateMachine, 22000),
     },
   };
 
@@ -900,8 +1020,10 @@ async function validateSddGate(meta: FileRunMeta, constraints: SddConstraints): 
     evidence: conflict.evidence,
     suggestion: conflict.suggestion,
   }));
+  const hasErrorConflict = conflicts.some((conflict) => conflict.severity === "error");
   return {
     ...normalized,
+    passed: hasErrorConflict ? normalized.passed : true,
     conflicts,
     meta: {
       ...(normalized.meta ?? {}),
@@ -1136,7 +1258,16 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
       const generated = await runSingleFileGeneration(meta, fileId, attempt);
       await writeFileBody(meta.workspacePath, meta.runId, fileId, generated.content);
       if (fileId === "08") {
-        const constraints = extractSddConstraintsFromMarkdown(generated.content);
+        let constraints: SddConstraints;
+        try {
+          constraints = extractSddConstraintsFromMarkdown(generated.content);
+        } catch (parseError) {
+          constraints = await recoverSddConstraintsByLlm(meta, generated.content, parseError);
+          await appendEventLog(meta.workspacePath, meta.runId, "SDD_CONSTRAINTS_RECOVERED", {
+            fileId,
+            reason: parseError instanceof Error ? parseError.message : String(parseError),
+          });
+        }
         await writeJson(getSddConstraintsPath(meta.workspacePath, meta.runId), constraints);
         await appendEventLog(meta.workspacePath, meta.runId, "SDD_CONSTRAINTS_EXTRACTED", {
           fileId,

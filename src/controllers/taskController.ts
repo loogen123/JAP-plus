@@ -20,7 +20,8 @@ import {
   appendEventLog,
   writeFileBody,
   readSddConstraints,
-  readSddGateValidation
+  readSddGateValidation,
+  listSddSourceRuns,
 } from "../services/taskService.js";
 import { emitTaskScopedEvent } from "../runtime/workflowEvents.js";
 
@@ -185,6 +186,163 @@ export class TaskController {
       }
       await filewiseGenerateCurrent(meta);
       const refreshed = await readMeta(workspacePath, runId);
+      res.json(toFileStatusResponse(refreshed, workspacePath));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message });
+    }
+  }
+
+  async generateBaseNext(req: Request, res: Response) {
+    const runId = String(req.params.runId ?? "").trim();
+    const workspacePath = resolveWorkspacePath(req.body?.workspace ?? req.query.workspace ?? req.query.workspacePath);
+    if (!runId) {
+      res.status(400).json({ message: "runId is required" });
+      return;
+    }
+    try {
+      const meta = await readMeta(workspacePath, runId);
+      const runtime = getFileRuntimeRecord(meta);
+      if (!runtime.actions.canGenerateNext || !meta.currentFile) {
+        res.status(409).json({ message: "no file is ready for generation", ...toFileStatusResponse(meta, workspacePath) });
+        return;
+      }
+      if (meta.currentFile === "08") {
+        res.status(409).json({ message: "base generation only supports file 01-07", ...toFileStatusResponse(meta, workspacePath) });
+        return;
+      }
+      await filewiseGenerateCurrent(meta);
+      const refreshed = await readMeta(workspacePath, runId);
+      res.json(toFileStatusResponse(refreshed, workspacePath));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message });
+    }
+  }
+
+  async generateSdd(req: Request, res: Response) {
+    const runId = String(req.params.runId ?? "").trim();
+    const workspacePath = resolveWorkspacePath(req.body?.workspace ?? req.query.workspace ?? req.query.workspacePath);
+    if (!runId) {
+      res.status(400).json({ message: "runId is required" });
+      return;
+    }
+    try {
+      const sourceRunId = String(req.body?.sourceRunId ?? "").trim();
+      const currentMeta = await readMeta(workspacePath, runId);
+      const targetRunId = sourceRunId || runId;
+      let meta = await readMeta(workspacePath, targetRunId);
+      if (sourceRunId) {
+        const baseReady = ["01", "02", "03", "04", "05", "06", "07"].every((fileId) => {
+          const state = meta.files.find((item) => item.fileId === fileId);
+          return state?.status === "APPROVED";
+        });
+        if (!baseReady) {
+          res.status(409).json({ message: "历史任务未完成01-07审核通过，不能用于SDD生成" });
+          return;
+        }
+        meta.llm = currentMeta.llm;
+        upsertFileState(meta, "08", { status: "PENDING", lastError: null });
+        await saveMeta(meta);
+        meta = await readMeta(workspacePath, targetRunId);
+      }
+      const runtime = getFileRuntimeRecord(meta);
+      if (!meta.currentFile) {
+        res.status(409).json({ message: "no current file to generate", ...toFileStatusResponse(meta, workspacePath) });
+        return;
+      }
+      if (meta.currentFile !== "08") {
+        res.status(409).json({ message: "sdd generation only supports file 08", ...toFileStatusResponse(meta, workspacePath) });
+        return;
+      }
+      if (!runtime.actions.canGenerateNext) {
+        res.status(409).json({ message: "file 08 is not ready for generation", ...toFileStatusResponse(meta, workspacePath) });
+        return;
+      }
+      await filewiseGenerateCurrent(meta);
+      let refreshed = await readMeta(workspacePath, targetRunId);
+      const sddFile = refreshed.files.find((item) => item.fileId === "08");
+      if (sddFile && (sddFile.status === "GENERATED" || sddFile.status === "REVIEWING")) {
+        upsertFileState(refreshed, "08", { status: "APPROVED", lastError: null });
+        await saveMeta(refreshed);
+        await appendEventLog(workspacePath, targetRunId, "FILE_APPROVED", { fileId: "08", auto: true });
+        refreshed = await readMeta(workspacePath, targetRunId);
+      }
+      res.json(toFileStatusResponse(refreshed, workspacePath));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message });
+    }
+  }
+
+  async listSddSources(req: Request, res: Response) {
+    const runId = String(req.params.runId ?? "").trim();
+    const workspacePath = resolveWorkspacePath(req.query.workspace ?? req.query.workspacePath ?? req.body?.workspace);
+    if (!runId) {
+      res.status(400).json({ message: "runId is required" });
+      return;
+    }
+    try {
+      const items = await listSddSourceRuns(workspacePath, runId);
+      res.json({ runId, workspacePath, items });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message });
+    }
+  }
+
+  async listGlobalSddSources(req: Request, res: Response) {
+    const workspacePath = resolveWorkspacePath(req.query.workspace ?? req.query.workspacePath ?? req.body?.workspace);
+    try {
+      const items = await listSddSourceRuns(workspacePath, "");
+      res.json({ workspacePath, items });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message });
+    }
+  }
+
+  async generateSddFromSource(req: Request, res: Response) {
+    const sourceRunId = String(req.body?.sourceRunId ?? "").trim();
+    const llm = req.body?.llm ?? {};
+    const workspace = req.body?.workspace ?? {};
+    const workspacePath = resolveWorkspacePath(workspace);
+    if (!sourceRunId) {
+      res.status(400).json({ message: "sourceRunId is required" });
+      return;
+    }
+    try {
+      const sourceMeta = await readMeta(workspacePath, sourceRunId);
+      const baseReady = ["01", "02", "03", "04", "05", "06", "07"].every((fileId) => {
+        const state = sourceMeta.files.find((item) => item.fileId === fileId);
+        return state?.status === "APPROVED";
+      });
+      if (!baseReady) {
+        res.status(409).json({ message: "历史任务未完成01-07审核通过，不能用于SDD生成" });
+        return;
+      }
+      const llmRaw = llm && typeof llm === "object" ? (llm as Record<string, unknown>) : {};
+      if (typeof llmRaw.baseUrl === "string" && llmRaw.baseUrl.trim()) {
+        sourceMeta.llm.baseUrl = llmRaw.baseUrl.trim();
+      }
+      if (typeof llmRaw.apiKey === "string" && llmRaw.apiKey.trim()) {
+        sourceMeta.llm.apiKey = llmRaw.apiKey.trim();
+      }
+      if (typeof llmRaw.modelName === "string" && llmRaw.modelName.trim()) {
+        sourceMeta.llm.modelName = llmRaw.modelName.trim();
+      }
+      upsertFileState(sourceMeta, "08", { status: "PENDING", lastError: null });
+      await saveMeta(sourceMeta);
+      const ready = await readMeta(workspacePath, sourceRunId);
+      await filewiseGenerateCurrent(ready);
+      let refreshed = await readMeta(workspacePath, sourceRunId);
+      const sddFile = refreshed.files.find((item) => item.fileId === "08");
+      if (sddFile && (sddFile.status === "GENERATED" || sddFile.status === "REVIEWING")) {
+        upsertFileState(refreshed, "08", { status: "APPROVED", lastError: null });
+        await saveMeta(refreshed);
+        await appendEventLog(workspacePath, sourceRunId, "FILE_APPROVED", { fileId: "08", auto: true });
+        refreshed = await readMeta(workspacePath, sourceRunId);
+      }
       res.json(toFileStatusResponse(refreshed, workspacePath));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

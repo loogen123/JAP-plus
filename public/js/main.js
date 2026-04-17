@@ -46,6 +46,8 @@
     let currentRunState = null;
     let selectedFileId = null;
     let isAutoRunning = false;
+    let sddSourceRuns = [];
+    let selectedSddSourceRunId = null;
 
     function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
     function normalizeAnswersForApi(){
@@ -108,9 +110,21 @@
       document.getElementById("elicitationMode").value = getElicitationMode();
         const showEl = document.getElementById("showIntermediateArtifacts");
         if(showEl) showEl.checked = getShowIntermediateArtifacts();
-      document.getElementById("settingsModal").classList.add("show"); 
+      const settingsModal = document.getElementById("settingsModal");
+      const historyModal = document.getElementById("historyModal");
+      // 当历史任务弹窗打开时，确保设置弹窗叠在其上层显示
+      if (historyModal?.classList.contains("show")) {
+        settingsModal.style.zIndex = "90";
+      } else {
+        settingsModal.style.zIndex = "";
+      }
+      settingsModal.classList.add("show"); 
     }
-    function closeSettings(){ document.getElementById("settingsModal").classList.remove("show"); }
+    function closeSettings(){
+      const settingsModal = document.getElementById("settingsModal");
+      settingsModal.classList.remove("show");
+      settingsModal.style.zIndex = "";
+    }
     function clearConsole(){ document.getElementById("logContainer").innerHTML = ""; }
 
     function getSessionLlmConfig(){ try { const raw=sessionStorage.getItem(SESSION_LLM_CONFIG_KEY); return raw?JSON.parse(raw):null; } catch { return null; } }
@@ -185,8 +199,10 @@
 
     function updateFileActionButtons(){
       const actions = currentRunState?.actions || {};
+      const currentFile = currentRunState?.currentFile || null;
       const previewText = (document.getElementById("filePreview")?.value || "").trim();
-      document.getElementById("btnGenerateNext").disabled = !actions.canGenerateNext;
+      document.getElementById("btnGenerateBase").disabled = !(actions.canGenerateNext && currentFile && currentFile !== "08");
+      document.getElementById("btnGenerateSdd").disabled = !(actions.canGenerateNext && currentFile === "08");
       document.getElementById("btnApprove").disabled = !actions.canApprove;
       document.getElementById("btnReject").disabled = !actions.canReject;
       document.getElementById("btnRegenerate").disabled = !actions.canRegenerate;
@@ -536,14 +552,14 @@
       if(isAutoRunning) {
         isAutoRunning = false;
         addLog("系统", "已停止自动生成");
-        document.getElementById("btnAutoRun").textContent = "一键自动生成 (免审核)";
+        document.getElementById("btnAutoRun").textContent = "一键自动生成前7文件 (免审核)";
         document.getElementById("btnAutoRun").style.background = "#f2f7ff";
         document.getElementById("btnAutoRun").style.color = "#2f5d9e";
         document.getElementById("btnAutoRun").style.borderColor = "#a8c5ff";
       } else {
         if(!currentRunId) { addLog("系统", "当前没有正在运行的任务"); return; }
         isAutoRunning = true;
-        addLog("系统", "已开启一键自动生成，将自动跑完所有文件...");
+        addLog("系统", "已开启一键自动生成，将自动跑完前7个文件...");
         document.getElementById("btnAutoRun").textContent = "停止自动生成";
         document.getElementById("btnAutoRun").style.background = "#fff7f7";
         document.getElementById("btnAutoRun").style.color = "#d85555";
@@ -555,6 +571,11 @@
     async function autoRunLoop() {
       while(isAutoRunning && currentRunId && currentRunState) {
         const actions = currentRunState.actions || {};
+        if(currentRunState.currentFile === "08") {
+          addLog("系统", "前7个文件已完成，自动生成停止在SDD前", "success");
+          toggleAutoRun();
+          break;
+        }
         if(currentRunState.stage === "DONE" || !currentRunState.currentFile) {
           addLog("系统", "自动生成已完成", "success");
           toggleAutoRun();
@@ -587,6 +608,11 @@
       if(modalPath) return modalPath;
       return getActiveWorkspacePath();
     }
+    function getSddSourceWorkspacePath(){
+      const modalPath = (document.getElementById("sddSourceWorkspacePath").value||"").trim();
+      if(modalPath) return modalPath;
+      return getActiveWorkspacePath();
+    }
     async function chooseHistoryWorkspaceFolder(){
       try{
         const resp=await fetch(API_BASE+"/api/v1/config/workspace/choose",{method:"POST"});
@@ -608,6 +634,112 @@
     }
     function closeHistoryModal(){
       document.getElementById("historyModal").classList.remove("show");
+    }
+    async function chooseSddSourceWorkspaceFolder(){
+      try{
+        const resp=await fetch(API_BASE+"/api/v1/config/workspace/choose",{method:"POST"});
+        const data=await resp.json();
+        if(!resp.ok||!data?.path){ addLog("错误",data?.message||"未选择目录","error"); return; }
+        document.getElementById("sddSourceWorkspacePath").value = data.path;
+        await loadSddSourceRuns();
+      }catch(error){
+        addLog("错误",String(error?.message||error),"error");
+      }
+    }
+    function openSddSourceModal(){
+      if(currentRunId && currentRunState?.currentFile !== "08"){
+        addLog("系统","当前不在8号文件阶段，不能生成SDD");
+        return;
+      }
+      const currentPath = getActiveWorkspacePath();
+      if(currentPath){
+        document.getElementById("sddSourceWorkspacePath").value = currentPath;
+      }
+      selectedSddSourceRunId = null;
+      document.getElementById("sddSourceModal").classList.add("show");
+      void loadSddSourceRuns();
+    }
+    function closeSddSourceModal(){
+      document.getElementById("sddSourceModal").classList.remove("show");
+    }
+    function renderSddSourceRuns(){
+      const listEl = document.getElementById("sddSourceList");
+      const infoEl = document.getElementById("sddSourceInfo");
+      const confirmBtn = document.getElementById("sddSourceConfirmBtn");
+      if(!Array.isArray(sddSourceRuns) || sddSourceRuns.length===0){
+        listEl.innerHTML = '<div class="history-empty">未找到可用历史流程（需01-07全部审核通过）</div>';
+        infoEl.textContent = "未选择历史流程";
+        confirmBtn.disabled = true;
+        return;
+      }
+      listEl.innerHTML = sddSourceRuns.map((item)=>{
+        const active = selectedSddSourceRunId===item.runId;
+        return `<div class="history-item ${active?"active":""}" onclick="selectSddSourceRun('${esc(item.runId)}')"><div style="font-size:13px;font-weight:600;color:#2f4061;">${esc(item.runId)}</div><div class="history-meta">更新时间：${new Date(item.updatedAt).toLocaleString()} · 阶段：${esc(item.stage||"--")}</div><div class="history-summary">状态：${esc(item.status||"--")} · 当前文件：${esc(item.currentFile||"--")}</div></div>`;
+      }).join("");
+      const selected = sddSourceRuns.find((item)=>item.runId===selectedSddSourceRunId);
+      infoEl.textContent = selected ? `已选择：${selected.runId}` : "未选择历史流程";
+      confirmBtn.disabled = !selected;
+    }
+    function selectSddSourceRun(runId){
+      selectedSddSourceRunId = runId;
+      renderSddSourceRuns();
+    }
+    async function loadSddSourceRuns(){
+      const workspacePath = getSddSourceWorkspacePath();
+      const query = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : "";
+      try{
+        const apiPath = currentRunId
+          ? `/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/sdd-sources`
+          : "/api/v1/tasks/filewise/sdd-sources";
+        const resp=await fetch(API_BASE+`${apiPath}${query}`,{ cache:"no-store" });
+        const data=await resp.json();
+        if(!resp.ok){ addLog("错误",data?.message||"加载SDD历史流程失败","error"); return; }
+        sddSourceRuns = Array.isArray(data?.items) ? data.items : [];
+        renderSddSourceRuns();
+      }catch(error){
+        addLog("错误",String(error?.message||error),"error");
+      }
+    }
+    async function confirmGenerateSddWithSource(){
+      if(!selectedSddSourceRunId){ addLog("系统","请先选择历史流程"); return; }
+      const btn = document.getElementById("sddSourceConfirmBtn");
+      btn.disabled = true;
+      closeSddSourceModal();
+      addLog("系统",`已开始生成SDD，历史流程=${selectedSddSourceRunId}`);
+      try{
+        if(currentRunId){
+          addLog("系统",`在当前任务 ${currentRunId} 上导入历史1-7并生成SDD...`);
+          await filewiseGenerateSdd(selectedSddSourceRunId);
+          addLog("系统","SDD生成流程已提交完成","success");
+        } else {
+          const llm=buildTaskLlmConfig();
+          if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
+          const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+          addLog("系统","正在基于历史流程创建任务并生成SDD...");
+          const resp=await fetch(API_BASE+"/api/v1/tasks/filewise/generate-sdd-from-source",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({
+              sourceRunId: selectedSddSourceRunId,
+              llm,
+              workspace: workspacePath ? {path:workspacePath} : undefined
+            })
+          });
+          const data=await resp.json();
+          if(!resp.ok){ addLog("错误",data?.message||"基于历史流程生成SDD失败","error"); return; }
+          currentRunId = data.runId;
+          currentTaskId = data.runId;
+          currentRunState = data;
+          setTaskIdentity(currentRunId, selectedSddSourceRunId);
+          connectWebSocketForTask(currentRunId);
+          await refreshFilewiseRun();
+          addLog("系统",`SDD生成完成，任务ID=${currentRunId}`,"success");
+        }
+      } catch (error) {
+        addLog("错误",`SDD生成异常：${String(error?.message||error)}`,"error");
+      } finally {
+        btn.disabled = false;
+      }
     }
     function renderHistoryList(){
       const container=document.getElementById("historyList");
@@ -1084,10 +1216,10 @@
       document.getElementById("workspaceStatus").textContent=`当前目录：${data.workspacePath || workspacePath || "output"}`;
       document.getElementById("workspacePathLabel").textContent=data.workspacePath || workspacePath || "output";
     }
-    async function filewiseGenerateNext(){
+    async function filewiseGenerateBaseNext(){
       if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-next`,{
+      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-base-next`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({workspace: workspacePath ? {path:workspacePath} : undefined})
@@ -1101,6 +1233,40 @@
       }
       currentRunState = data;
       await refreshFilewiseRun();
+    }
+    async function filewiseGenerateSdd(sourceRunId){
+      if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-sdd`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          sourceRunId: sourceRunId || undefined,
+          workspace: workspacePath ? {path:workspacePath} : undefined
+        })
+      });
+      const data=await resp.json();
+      if(!resp.ok){
+        const fileId=data?.currentFile;
+        const detail=Array.isArray(data?.files) && fileId ? (data.files.find((f)=>f.fileId===fileId)?.lastError || "") : "";
+        addLog("错误",[data?.message||"SDD生成失败",detail].filter(Boolean).join(" | "),"error");
+        return;
+      }
+      if(data?.runId){
+        currentRunId = data.runId;
+        currentTaskId = data.runId;
+        setTaskIdentity(currentRunId, sourceRunId || document.getElementById("sourceTaskId").textContent || "--");
+        connectWebSocketForTask(currentRunId);
+      }
+      currentRunState = data;
+      await refreshFilewiseRun();
+    }
+    async function filewiseGenerateNext(){
+      if(currentRunState?.currentFile === "08"){
+        await filewiseGenerateSdd();
+        return;
+      }
+      await filewiseGenerateBaseNext();
     }
     async function filewiseApprove(){
       if(!currentRunId || !currentRunState?.currentFile){ return; }
