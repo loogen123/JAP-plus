@@ -38,6 +38,17 @@ function extractTextFromMessageContent(content: unknown): string {
 }
 
 function extractJsonObject(text: string): string | null {
+  // 1. 尝试直接找 ```json ... ``` 块
+  const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
+  const match = text.match(jsonBlockRegex);
+  if (match && match[1]) {
+    const content = match[1].trim();
+    if (content.startsWith("{") && content.endsWith("}")) {
+      return content;
+    }
+  }
+
+  // 2. 兜底：寻找第一个 { 和最后一个 }
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) {

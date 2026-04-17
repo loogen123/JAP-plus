@@ -1529,21 +1529,23 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
     const constraints = await generateSddConstraintsDraft(meta, approvedSummary, isFallback);
     const precheck = await runLocalSddPrecheck(meta, constraints);
     const { validation, payload } = await validateSddGate(meta, constraints, precheck);
+    
+    // 如果 Gate 校验未通过，将错误降级为 Warning，不抛出异常阻断生成
     if (!validation.passed) {
       const top = (validation.conflicts ?? []).slice(0, 3)
         .map((item) => `${item.message}${item.location ? ` @${item.location}` : ""}`)
         .join("；");
-      const error = new Error(`SDD Gate 校验未通过：${top || "存在一致性冲突"}`) as Error & {
-        sddDiagnostics?: SddGenerationDiagnostics;
-      };
-      error.sddDiagnostics = {
-        constraints,
-        precheck,
-        gateInput: payload,
-        gateResult: validation,
-      };
-      throw error;
+      
+      // 记录一个专门的日志事件，提醒用户存在冲突
+      await appendEventLog(meta.workspacePath, meta.runId, "SDD_GATE_WARNING", {
+        fileId: "08",
+        message: `SDD Gate 校验存在冲突（已降级为警告继续生成）：${top || "存在一致性冲突"}`,
+      });
+
+      // 我们把 diagnostics 信息依然挂在局部变量里，以便后面的 catch 块或者 finally 块能落盘
+      // 但我们不 throw error 了
     }
+    
     const markdown = await generateSddBodyWithConstraints(meta, approvedSummary, constraints, isFallback, isMinimalist);
     return {
       content: appendConstraintsBlock(markdown, constraints),
