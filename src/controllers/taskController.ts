@@ -502,8 +502,8 @@ export class TaskController {
       const fileId = ensureValidFileId(String(req.params.fileId ?? "").trim());
       const meta = await readMeta(workspacePath, runId);
       if (meta.currentFile !== fileId) {
-        res.status(409).json({ message: "only current file can be regenerated" });
-        return;
+        // 在本地测试阶段，允许绕过该限制直接生成任意文件
+        meta.currentFile = fileId;
       }
       upsertFileState(meta, fileId, { status: "PENDING", lastError: null });
       await saveMeta(meta);

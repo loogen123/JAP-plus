@@ -1086,7 +1086,8 @@ function parseOpenApiSignatures(openapi: string): Set<string> {
   let currentPath = "";
   const out = new Set<string>();
   for (const line of lines) {
-    const pathMatch = line.match(/^\/([^\s:]+)\s*:\s*$/);
+    // 匹配 YAML 中的路径，允许前面有缩进，允许根路径 "/"
+    const pathMatch = line.match(/^\s*\/([^\s:]*)\s*:\s*$/);
     if (pathMatch) {
       currentPath = `/${pathMatch[1] ?? ""}`;
       continue;
@@ -1102,7 +1103,7 @@ function parseOpenApiSignatures(openapi: string): Set<string> {
 
 function parseTableColumns(domain: string): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
-  const createTable = /create\s+table\s+`?([a-zA-Z0-9_]+)`?\s*\(([\s\S]*?)\);/gi;
+  const createTable = /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:`?[a-zA-Z0-9_]+`?\.)?`?([a-zA-Z0-9_]+)`?\s*\(([\s\S]*?)\)/gi;
   for (const match of domain.matchAll(createTable)) {
     const table = normalizeWord(match[1] ?? "");
     if (!table) continue;
