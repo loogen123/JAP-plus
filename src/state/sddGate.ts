@@ -4,6 +4,7 @@ export const SddGateConflictSchema = z.object({
   category: z.enum(["api", "data", "state", "nonfunctional", "other"]).optional(),
   severity: z.enum(["error", "warning"]).optional(),
   message: z.string(),
+  location: z.string().optional(),
   evidence: z.string().optional(),
   suggestion: z.string().optional(),
 });

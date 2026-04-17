@@ -48,6 +48,8 @@
     let isAutoRunning = false;
     let sddSourceRuns = [];
     let selectedSddSourceRunId = null;
+    let recentEventLastAt = "";
+    let sddHeartbeatTimer = null;
 
     function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
     function normalizeAnswersForApi(){
@@ -184,6 +186,49 @@
 
     function esc(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll("\"","&quot;").replaceAll("'","&#39;"); }
     function addLog(tag,msg,level="info"){ const root=document.getElementById("logContainer"); const color=level==="success"?"#2c9a58":level==="error"?"#d35a68":"#5673a0"; const line=document.createElement("div"); line.className="log-line"; line.innerHTML=`<span style="color:#7f8ca5;margin-right:8px;">[${new Date().toLocaleTimeString()}]</span><span style="color:${color};font-weight:700;">${esc(tag)}</span> ${esc(msg)}`; root.appendChild(line); root.scrollTop=root.scrollHeight; }
+    function buildSddErrorMessage(data){
+      const code = data?.errorCode || "SDD_GENERATION_FAILED";
+      const stage = data?.stage || "DETAILING";
+      const lastEventAt = data?.lastEventAt ? ` lastEventAt=${data.lastEventAt}` : "";
+      const msg = data?.message || "SDD生成失败";
+      return `[${code}] stage=${stage}${lastEventAt} | ${msg}`;
+    }
+    async function pullRecentEvents(tail=200){
+      if(!currentRunId) return;
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const queryParts = [`tail=${encodeURIComponent(String(tail))}`];
+      if(workspacePath) queryParts.push(`workspace=${encodeURIComponent(workspacePath)}`);
+      const query = `?${queryParts.join("&")}`;
+      const resp = await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/events${query}`,{ cache:"no-store" });
+      const data = await resp.json();
+      if(!resp.ok) return;
+      const events = Array.isArray(data?.events) ? data.events : [];
+      const latestAt = data?.lastEventAt || "";
+      const hasNew = latestAt && latestAt !== recentEventLastAt;
+      if(hasNew){
+        recentEventLastAt = latestAt;
+        const tailEvents = events.slice(-8);
+        tailEvents.forEach((e)=>{
+          if(e?.type === "SDD_FAILURE_SUMMARY"){
+            addLog("SDD失败",`Top3冲突: ${e?.top3 || "无"} | 建议: ${e?.suggestion || "请先修正01-07后重试"}`,"error");
+          }
+        });
+      }
+      return data;
+    }
+    function stopSddHeartbeat(){
+      if(sddHeartbeatTimer){ clearInterval(sddHeartbeatTimer); sddHeartbeatTimer = null; }
+    }
+    function startSddHeartbeat(){
+      stopSddHeartbeat();
+      sddHeartbeatTimer = setInterval(async ()=>{
+        const before = recentEventLastAt;
+        await pullRecentEvents(200);
+        if(before && before === recentEventLastAt){
+          addLog("系统","仍在生成中");
+        }
+      }, 30000);
+    }
 
     function updateWorkspaceProgress(stage){ const idx=Math.max(0,STATE_ORDER.indexOf(stage)); const pct=Math.round((idx/(STATE_ORDER.length-2))*100); const v=stage==="ERROR"?100:Math.min(100,Math.max(0,pct)); document.getElementById("workspaceProgressBar").style.width=`${v}%`; document.getElementById("workspaceProgressText").textContent=`${v}%`; document.getElementById("workspaceStage").textContent=stage; }
 
@@ -266,6 +311,7 @@
         const status=d.status||"--";
         const err=d.error?`，原因：${d.error}`:"";
         addLog("文件",`${fileId} -> ${status}${err}`,status==="FAILED"?"error":"info");
+        if(status==="FAILED"){ void pullRecentEvents(200); }
         refreshFilewiseRun();
         return;
       }
@@ -706,6 +752,7 @@
       btn.disabled = true;
       closeSddSourceModal();
       addLog("系统",`已开始生成SDD，历史流程=${selectedSddSourceRunId}`);
+      startSddHeartbeat();
       try{
         if(currentRunId){
           addLog("系统",`在当前任务 ${currentRunId} 上导入历史1-7并生成SDD...`);
@@ -726,10 +773,16 @@
             })
           });
           const data=await resp.json();
-          if(!resp.ok){ addLog("错误",data?.message||"基于历史流程生成SDD失败","error"); return; }
+          if(!resp.ok){
+            addLog("错误",buildSddErrorMessage(data),"error");
+            await pullRecentEvents(200);
+            stopSddHeartbeat();
+            return;
+          }
           currentRunId = data.runId;
           currentTaskId = data.runId;
           currentRunState = data;
+          recentEventLastAt = data?.lastEventAt || recentEventLastAt;
           setTaskIdentity(currentRunId, selectedSddSourceRunId);
           connectWebSocketForTask(currentRunId);
           await refreshFilewiseRun();
@@ -737,6 +790,8 @@
         }
       } catch (error) {
         addLog("错误",`SDD生成异常：${String(error?.message||error)}`,"error");
+        await pullRecentEvents(200);
+        stopSddHeartbeat();
       } finally {
         btn.disabled = false;
       }
@@ -1190,13 +1245,15 @@
       if(!resp.ok){ addLog("错误",data?.message||"读取流水线状态失败","error"); return; }
       currentRunState = data;
       currentTaskId = data.runId;
+      await pullRecentEvents(200);
       setTaskIdentity(data.runId, document.getElementById("sourceTaskId").textContent || "--");
       activateState(mapFilewiseStageToUi(data.stage));
       updateFileTree(data.files || []);
       if (data?.sdd?.validation && data.sdd.validation.passed === false) {
         const conflicts = Array.isArray(data.sdd.validation.conflicts) ? data.sdd.validation.conflicts : [];
-        const head = conflicts.slice(0, 3).map((c) => c.message).filter(Boolean).join("；");
-        addLog("SDD Gate", `未通过：${head || "存在一致性冲突"}`, "error");
+        const head = conflicts.slice(0, 3).map((c) => `${c.message || ""}${c.location ? ` @${c.location}` : ""}`).filter(Boolean).join("；");
+        const action = conflicts.slice(0, 3).map((c) => c.suggestion).filter(Boolean).join("；");
+        addLog("SDD Gate", `未通过：${head || "存在一致性冲突"} | 建议：${action || "先修正01-07后重试"}`, "error");
       }
       if(data.currentFile){
         document.getElementById("previewName").textContent = data.currentFile;
@@ -1215,6 +1272,9 @@
       }
       document.getElementById("workspaceStatus").textContent=`当前目录：${data.workspacePath || workspacePath || "output"}`;
       document.getElementById("workspacePathLabel").textContent=data.workspacePath || workspacePath || "output";
+      if(data.stage === "DONE" || data.status === "DONE"){
+        stopSddHeartbeat();
+      }
     }
     async function filewiseGenerateBaseNext(){
       if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
@@ -1236,6 +1296,7 @@
     }
     async function filewiseGenerateSdd(sourceRunId){
       if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
+      startSddHeartbeat();
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
       const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-sdd`,{
         method:"POST",
@@ -1247,9 +1308,9 @@
       });
       const data=await resp.json();
       if(!resp.ok){
-        const fileId=data?.currentFile;
-        const detail=Array.isArray(data?.files) && fileId ? (data.files.find((f)=>f.fileId===fileId)?.lastError || "") : "";
-        addLog("错误",[data?.message||"SDD生成失败",detail].filter(Boolean).join(" | "),"error");
+        addLog("错误",buildSddErrorMessage(data),"error");
+        await pullRecentEvents(200);
+        stopSddHeartbeat();
         return;
       }
       if(data?.runId){

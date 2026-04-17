@@ -22,10 +22,45 @@ import {
   readSddConstraints,
   readSddGateValidation,
   listSddSourceRuns,
+  readRunEventsTail,
+  getRunLastEventAt,
 } from "../services/taskService.js";
 import { emitTaskScopedEvent } from "../runtime/workflowEvents.js";
 
 export class TaskController {
+  private inferSddErrorCode(message: string): string {
+    const text = message.toLowerCase();
+    if (text.includes("connection error") || text.includes("econn") || text.includes("socket hang up")) {
+      return "SDD_LLM_CONNECTION_ERROR";
+    }
+    if (text.includes("timeout") || text.includes("timed out")) {
+      return "SDD_LLM_TIMEOUT";
+    }
+    if (text.includes("unauthorized") || text.includes("invalid api key") || text.includes("401")) {
+      return "SDD_LLM_AUTH_ERROR";
+    }
+    if (text.includes("rate limit") || text.includes("429")) {
+      return "SDD_LLM_RATE_LIMIT";
+    }
+    return "SDD_GENERATION_FAILED";
+  }
+
+  private async buildSddErrorPayload(
+    workspacePath: string,
+    runId: string,
+    stage: string,
+    message: string,
+    errorCode?: string,
+  ) {
+    const lastEventAt = await getRunLastEventAt(workspacePath, runId);
+    return {
+      message,
+      errorCode: errorCode || this.inferSddErrorCode(message),
+      stage,
+      lastEventAt,
+    };
+  }
+
   async getHistoryRequirements(req: Request, res: Response) {
     const queryWorkspacePath = typeof req.query.workspacePath === "string" ? req.query.workspacePath : "";
     const workspacePath = resolveWorkspacePath(queryWorkspacePath);
@@ -170,6 +205,25 @@ export class TaskController {
     }
   }
 
+  async getFilewiseEvents(req: Request, res: Response) {
+    const runId = String(req.params.runId ?? "").trim();
+    const workspacePath = resolveWorkspacePath(req.query.workspace ?? req.query.workspacePath ?? req.body?.workspace);
+    const tailRaw = Number(req.query.tail ?? 200);
+    const tail = Number.isFinite(tailRaw) ? Math.max(1, Math.min(1000, Math.floor(tailRaw))) : 200;
+    if (!runId) {
+      res.status(400).json({ message: "runId is required" });
+      return;
+    }
+    try {
+      const events = await readRunEventsTail(workspacePath, runId, tail);
+      const lastEventAt = events.length > 0 ? String(events[events.length - 1]?.at ?? "") : null;
+      res.json({ runId, tail, lastEventAt, events });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message });
+    }
+  }
+
   async generateNext(req: Request, res: Response) {
     const runId = String(req.params.runId ?? "").trim();
     const workspacePath = resolveWorkspacePath(req.body?.workspace ?? req.query.workspace ?? req.query.workspacePath);
@@ -271,7 +325,8 @@ export class TaskController {
       res.json(toFileStatusResponse(refreshed, workspacePath));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ message });
+      const payload = await this.buildSddErrorPayload(workspacePath, runId, "DETAILING", message);
+      res.status(500).json(payload);
     }
   }
 
@@ -308,7 +363,12 @@ export class TaskController {
     const workspace = req.body?.workspace ?? {};
     const workspacePath = resolveWorkspacePath(workspace);
     if (!sourceRunId) {
-      res.status(400).json({ message: "sourceRunId is required" });
+      res.status(400).json({
+        message: "sourceRunId is required",
+        errorCode: "SDD_SOURCE_RUN_ID_REQUIRED",
+        stage: "DETAILING",
+        lastEventAt: null,
+      });
       return;
     }
     try {
@@ -318,7 +378,14 @@ export class TaskController {
         return state?.status === "APPROVED";
       });
       if (!baseReady) {
-        res.status(409).json({ message: "历史任务未完成01-07审核通过，不能用于SDD生成" });
+        const payload = await this.buildSddErrorPayload(
+          workspacePath,
+          sourceRunId,
+          "DETAILING",
+          "历史任务未完成01-07审核通过，不能用于SDD生成",
+          "SDD_SOURCE_NOT_READY",
+        );
+        res.status(409).json(payload);
         return;
       }
       const llmRaw = llm && typeof llm === "object" ? (llm as Record<string, unknown>) : {};
@@ -343,10 +410,23 @@ export class TaskController {
         await appendEventLog(workspacePath, sourceRunId, "FILE_APPROVED", { fileId: "08", auto: true });
         refreshed = await readMeta(workspacePath, sourceRunId);
       }
-      res.json(toFileStatusResponse(refreshed, workspacePath));
+      const lastEventAt = await getRunLastEventAt(workspacePath, sourceRunId);
+      res.json({
+        ...toFileStatusResponse(refreshed, workspacePath),
+        errorCode: null,
+        stage: refreshed.stage,
+        lastEventAt,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ message });
+      const payload = await this.buildSddErrorPayload(
+        workspacePath,
+        sourceRunId,
+        "DETAILING",
+        message,
+        "SDD_GENERATION_FAILED",
+      );
+      res.status(500).json(payload);
     }
   }
 

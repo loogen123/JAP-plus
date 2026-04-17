@@ -585,6 +585,52 @@ export async function appendEventLog(workspacePath: string, runId: string, type:
   );
 }
 
+export type RunEventRecord = {
+  at: string;
+  runId: string;
+  type: string;
+  [key: string]: unknown;
+};
+
+export async function readRunEventsTail(workspacePath: string, runId: string, tail: number): Promise<RunEventRecord[]> {
+  const paths = getRunPaths(workspacePath, runId);
+  let raw = "";
+  try {
+    raw = await fs.readFile(paths.eventsPath, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  const normalizedTail = Number.isFinite(tail) ? Math.max(1, Math.min(1000, Math.floor(tail))) : 200;
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const slice = lines.slice(-normalizedTail);
+  const out: RunEventRecord[] = [];
+  for (const line of slice) {
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      if (typeof parsed.type !== "string") {
+        continue;
+      }
+      out.push({
+        at: typeof parsed.at === "string" ? parsed.at : nowIso(),
+        runId: typeof parsed.runId === "string" ? parsed.runId : runId,
+        type: parsed.type,
+        ...parsed,
+      });
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+export async function getRunLastEventAt(workspacePath: string, runId: string): Promise<string | null> {
+  const events = await readRunEventsTail(workspacePath, runId, 1);
+  return events[0]?.at ?? null;
+}
+
 export function deriveStageFromCurrentFile(fileId: FileId | null): FileRunStage {
   if (!fileId) {
     return "DONE";
@@ -954,6 +1000,21 @@ function getSddValidationPath(workspacePath: string, runId: string): string {
   return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.validation.json"));
 }
 
+function getSddPrecheckPath(workspacePath: string, runId: string): string {
+  const paths = getRunPaths(workspacePath, runId);
+  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.precheck.json"));
+}
+
+function getSddGateInputPath(workspacePath: string, runId: string): string {
+  const paths = getRunPaths(workspacePath, runId);
+  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.gate.input.json"));
+}
+
+function getSddGateResultPath(workspacePath: string, runId: string): string {
+  const paths = getRunPaths(workspacePath, runId);
+  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.gate.result.json"));
+}
+
 export async function readSddGateValidation(workspacePath: string, runId: string): Promise<SddGateValidation | null> {
   try {
     const raw = await fs.readFile(getSddValidationPath(workspacePath, runId), "utf-8");
@@ -982,7 +1043,180 @@ export async function readSddConstraints(workspacePath: string, runId: string): 
   }
 }
 
-async function validateSddGate(meta: FileRunMeta, constraints: SddConstraints): Promise<SddGateValidation> {
+type SddPrecheckResult = {
+  passed: boolean;
+  conflicts: Array<{
+    category: "api" | "data" | "state" | "other";
+    severity: "error" | "warning";
+    message: string;
+    location: string;
+    evidence?: string;
+    suggestion?: string;
+  }>;
+  normalized: {
+    apiKeys: string[];
+    tableKeys: string[];
+    transitionKeys: string[];
+  };
+};
+
+function normalizeWord(value: string): string {
+  const plain = value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+  if (!plain) return plain;
+  if (plain.endsWith("ies") && plain.length > 3) return `${plain.slice(0, -3)}y`;
+  if (plain.endsWith("es") && plain.length > 2) return plain.slice(0, -2);
+  if (plain.endsWith("s") && plain.length > 1) return plain.slice(0, -1);
+  return plain;
+}
+
+function normalizeApiPath(rawPath: string): string {
+  const clean = rawPath.trim().replace(/\/+/g, "/").replace(/\/+$/g, "");
+  const segs = clean
+    .split("/")
+    .filter(Boolean)
+    .map((seg) => {
+      if (/^\{[^}]+\}$/.test(seg)) return "{id}";
+      return normalizeWord(seg);
+    });
+  return `/${segs.join("/") || ""}`;
+}
+
+function parseOpenApiSignatures(openapi: string): Set<string> {
+  const lines = openapi.split(/\r?\n/);
+  let currentPath = "";
+  const out = new Set<string>();
+  for (const line of lines) {
+    const pathMatch = line.match(/^\/([^\s:]+)\s*:\s*$/);
+    if (pathMatch) {
+      currentPath = `/${pathMatch[1] ?? ""}`;
+      continue;
+    }
+    const methodMatch = line.match(/^\s{2,}(get|post|put|patch|delete)\s*:\s*$/i);
+    if (methodMatch && currentPath) {
+      const method = methodMatch[1]?.toUpperCase() ?? "GET";
+      out.add(`${method} ${normalizeApiPath(currentPath)}`);
+    }
+  }
+  return out;
+}
+
+function parseTableColumns(domain: string): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const createTable = /create\s+table\s+`?([a-zA-Z0-9_]+)`?\s*\(([\s\S]*?)\);/gi;
+  for (const match of domain.matchAll(createTable)) {
+    const table = normalizeWord(match[1] ?? "");
+    if (!table) continue;
+    const body = match[2] ?? "";
+    const cols = new Set<string>();
+    body.split(/\r?\n/).forEach((line) => {
+      const colMatch = line.trim().match(/^`?([a-zA-Z0-9_]+)`?\s+[a-zA-Z]/);
+      if (!colMatch) return;
+      const col = normalizeWord(colMatch[1] ?? "");
+      if (col && !["primary", "unique", "key", "index", "constraint", "foreign"].includes(col)) {
+        cols.add(col);
+      }
+    });
+    out.set(table, cols);
+  }
+  return out;
+}
+
+function parseStateTransitions(content: string): Set<string> {
+  const out = new Set<string>();
+  const edgeRegex = /([A-Za-z0-9_]+)\s*--?>\s*([A-Za-z0-9_]+)/g;
+  for (const match of content.matchAll(edgeRegex)) {
+    const from = normalizeWord(match[1] ?? "");
+    const to = normalizeWord(match[2] ?? "");
+    if (from && to) out.add(`${from}->${to}`);
+  }
+  return out;
+}
+
+async function runLocalSddPrecheck(meta: FileRunMeta, constraints: SddConstraints): Promise<SddPrecheckResult> {
+  const openapi = await readFileBody(meta.workspacePath, meta.runId, "04");
+  const domain = await readFileBody(meta.workspacePath, meta.runId, "02");
+  const stateMachine = await readFileBody(meta.workspacePath, meta.runId, "03");
+  const openapiKeys = parseOpenApiSignatures(openapi);
+  const tableMap = parseTableColumns(domain);
+  const transitionKeys = parseStateTransitions(stateMachine);
+  const conflicts: SddPrecheckResult["conflicts"] = [];
+
+  for (const api of constraints.apis) {
+    const method = String(api.method ?? "").toUpperCase();
+    const key = `${method} ${normalizeApiPath(String(api.path ?? ""))}`;
+    if (!openapiKeys.has(key)) {
+      conflicts.push({
+        category: "api",
+        severity: "error",
+        message: `API未命中：${method} ${api.path}`,
+        location: "04_api_contract.yaml",
+        evidence: key,
+        suggestion: "对齐04中的path和method（大小写/尾斜杠/参数占位符已归一化）",
+      });
+    }
+  }
+
+  for (const table of constraints.tables) {
+    const tableKey = normalizeWord(table.name);
+    const columns = tableMap.get(tableKey);
+    if (!columns) {
+      conflicts.push({
+        category: "data",
+        severity: "error",
+        message: `数据表未命中：${table.name}`,
+        location: "02_domain_model.md",
+        evidence: tableKey,
+        suggestion: "对齐02中的表名（已做单复数/大小写归一化）",
+      });
+      continue;
+    }
+    for (const col of table.requiredColumns ?? []) {
+      const colKey = normalizeWord(col);
+      if (!columns.has(colKey)) {
+        conflicts.push({
+          category: "data",
+          severity: "warning",
+          message: `字段未命中：${table.name}.${col}`,
+          location: "02_domain_model.md",
+          evidence: `${tableKey}.${colKey}`,
+          suggestion: "补充字段或在约束中移除该字段",
+        });
+      }
+    }
+  }
+
+  for (const sm of constraints.stateMachines) {
+    for (const tr of sm.transitions ?? []) {
+      const key = `${normalizeWord(tr.from)}->${normalizeWord(tr.to)}`;
+      if (!transitionKeys.has(key)) {
+        conflicts.push({
+          category: "state",
+          severity: "error",
+          message: `状态流转未命中：${sm.name} ${tr.from}->${tr.to}`,
+          location: "03_state_machine.md",
+          evidence: key,
+          suggestion: "对齐03中的状态节点与流转边",
+        });
+      }
+    }
+  }
+
+  return {
+    passed: !conflicts.some((item) => item.severity === "error"),
+    conflicts,
+    normalized: {
+      apiKeys: [...openapiKeys],
+      tableKeys: [...tableMap.keys()],
+      transitionKeys: [...transitionKeys],
+    },
+  };
+}
+
+async function validateSddGate(
+  meta: FileRunMeta,
+  constraints: SddConstraints,
+  precheck: SddPrecheckResult,
+): Promise<{ validation: SddGateValidation; payload: Record<string, unknown> }> {
   const openapi = await readFileBody(meta.workspacePath, meta.runId, "04");
   const domain = await readFileBody(meta.workspacePath, meta.runId, "02");
   const stateMachine = await readFileBody(meta.workspacePath, meta.runId, "03");
@@ -991,6 +1225,7 @@ async function validateSddGate(meta: FileRunMeta, constraints: SddConstraints): 
 
   const payload = {
     constraints,
+    precheck,
     artifacts: {
       openapi: clampText(openapi, 22000),
       domainModel: clampText(domain, 22000),
@@ -1017,19 +1252,32 @@ async function validateSddGate(meta: FileRunMeta, constraints: SddConstraints): 
     category: conflict.category ?? "other",
     severity: conflict.severity ?? "error",
     message: conflict.message,
+    location: conflict.location,
     evidence: conflict.evidence,
     suggestion: conflict.suggestion,
   }));
-  const hasErrorConflict = conflicts.some((conflict) => conflict.severity === "error");
-  return {
+  const mergedConflicts = [
+    ...precheck.conflicts.map((conflict) => ({
+      category: conflict.category,
+      severity: conflict.severity,
+      message: conflict.message,
+      location: conflict.location,
+      evidence: conflict.evidence,
+      suggestion: conflict.suggestion,
+    })),
+    ...conflicts,
+  ];
+  const hasErrorConflict = mergedConflicts.some((conflict) => conflict.severity === "error");
+  const validation: SddGateValidation = {
     ...normalized,
-    passed: hasErrorConflict ? normalized.passed : true,
-    conflicts,
+    passed: normalized.passed && !hasErrorConflict,
+    conflicts: mergedConflicts,
     meta: {
       ...(normalized.meta ?? {}),
       usedFallback,
     },
   };
+  return { validation, payload };
 }
 
 async function loadSddEvidence(meta: FileRunMeta): Promise<string> {
@@ -1166,13 +1414,150 @@ export async function tryGenerateWithMcp(
   }
 }
 
+async function generateSddConstraintsDraft(
+  meta: FileRunMeta,
+  approvedSummary: string,
+  fallbackContextOnly: boolean,
+): Promise<SddConstraints> {
+  const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
+  const structured = model.withStructuredOutput(SddConstraintsSchema, { method: "functionCalling" });
+  const skill = await loadSkillContext(meta.workspacePath);
+  const qa = buildQASnapshot(meta);
+  const evidence = await loadSddEvidence(meta);
+  const requirement = fallbackContextOnly ? clampText(meta.requirement, 6000) : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
+  const payload = {
+    requirement,
+    approvedSummary: clampText(approvedSummary, 12000),
+    evidence: clampText(evidence, 14000),
+    qa: clampText(qa, 3000),
+    skill: clampText(skill, 1800),
+  };
+  const { result } = await invokeStructuredWithJsonFallback<SddConstraints>({
+    invokeStructured: async () =>
+      SddConstraintsSchema.parse(
+        await structured.invoke([
+          new SystemMessage(
+            "仅输出SDD约束JSON，字段必须严格符合schema，要求与现有01-07内容一致；不要输出markdown或解释。",
+          ),
+          new HumanMessage(JSON.stringify(payload)),
+        ]),
+      ),
+    invokeFallback: () =>
+      model.invoke([
+        new SystemMessage(
+          "仅输出SDD约束JSON，字段必须包含version/apis/tables/stateMachines，且与01-07一致。",
+        ),
+        new HumanMessage(JSON.stringify(payload)),
+      ]),
+    safeParse: (value) => SddConstraintsSchema.safeParse(value),
+  });
+  return SddConstraintsSchema.parse(result);
+}
+
+function appendConstraintsBlock(markdown: string, constraints: SddConstraints): string {
+  const body = markdown.trim();
+  const jsonText = JSON.stringify(constraints, null, 2);
+  return [
+    body,
+    "",
+    "<!-- SDD_CONSTRAINTS_JSON_BEGIN -->",
+    "```json",
+    jsonText,
+    "```",
+    "<!-- SDD_CONSTRAINTS_JSON_END -->",
+  ].join("\n");
+}
+
+async function generateSddBodyWithConstraints(
+  meta: FileRunMeta,
+  approvedSummary: string,
+  constraints: SddConstraints,
+  fallbackContextOnly: boolean,
+  minimalist: boolean,
+): Promise<string> {
+  const skill = await loadSkillContext(meta.workspacePath);
+  const qa = buildQASnapshot(meta);
+  const evidence = await loadSddEvidence(meta);
+  const requirement = fallbackContextOnly ? clampText(meta.requirement, 6000) : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
+  const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
+  const extraPrompt = minimalist
+    ? "\nMINIMALIST MODE: keep concise sections only."
+    : "";
+  const prompt =
+    [
+      buildSddPrompt(requirement, approvedSummary, evidence, qa, skill),
+      "",
+      "Constraint JSON (SSOT):",
+      JSON.stringify(constraints),
+      "",
+      "必须严格依据Constraint JSON生成SDD正文，正文不要与约束冲突。",
+      "正文中不要再解释约束来源。",
+    ].join("\n") + extraPrompt;
+  const response = await model.invoke([
+    new SystemMessage(
+      SDD_NODE_SYSTEM_PROMPT +
+        "\n\n只输出SDD正文markdown，不要代码块包裹，不要JSON，不要解释。",
+    ),
+    new HumanMessage(prompt),
+  ]);
+  const text = typeof response.content === "string" ? response.content.trim() : "";
+  if (!text) {
+    throw new Error("SDD正文为空");
+  }
+  return text;
+}
+
+type SddGenerationDiagnostics = {
+  precheck: SddPrecheckResult;
+  gateInput: Record<string, unknown>;
+  gateResult: SddGateValidation;
+  constraints: SddConstraints;
+};
+
 export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId, attempt: number): Promise<{
   content: string;
   usedMcp: boolean;
   toolName: string | null;
   fallbackReason: string | null;
+  sddDiagnostics?: SddGenerationDiagnostics;
 }> {
   const approvedSummary = await loadApprovedArtifactSummary(meta);
+  const isFallback = attempt >= 2;
+  const isMinimalist = attempt === 3;
+
+  if (fileId === "08") {
+    const constraints = await generateSddConstraintsDraft(meta, approvedSummary, isFallback);
+    const precheck = await runLocalSddPrecheck(meta, constraints);
+    const { validation, payload } = await validateSddGate(meta, constraints, precheck);
+    if (!validation.passed) {
+      const top = (validation.conflicts ?? []).slice(0, 3)
+        .map((item) => `${item.message}${item.location ? ` @${item.location}` : ""}`)
+        .join("；");
+      const error = new Error(`SDD Gate 校验未通过：${top || "存在一致性冲突"}`) as Error & {
+        sddDiagnostics?: SddGenerationDiagnostics;
+      };
+      error.sddDiagnostics = {
+        constraints,
+        precheck,
+        gateInput: payload,
+        gateResult: validation,
+      };
+      throw error;
+    }
+    const markdown = await generateSddBodyWithConstraints(meta, approvedSummary, constraints, isFallback, isMinimalist);
+    return {
+      content: appendConstraintsBlock(markdown, constraints),
+      usedMcp: false,
+      toolName: null,
+      fallbackReason: isMinimalist ? "switched to minimalist mode" : (isFallback ? "switched to fallback context" : null),
+      sddDiagnostics: {
+        constraints,
+        precheck,
+        gateInput: payload,
+        gateResult: validation,
+      },
+    };
+  }
   
   if (attempt === 1) {
     const mcpResult = await tryGenerateWithMcp(meta, fileId, approvedSummary);
@@ -1187,8 +1572,6 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
   }
 
   const asArtifact = fileId as ArtifactFileId;
-  const isFallback = attempt >= 2;
-  const isMinimalist = attempt === 3;
 
   try {
     const content = await generateArtifactByLlm(
@@ -1253,40 +1636,30 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
   await appendEventLog(meta.workspacePath, meta.runId, "FILE_STAGE_CHANGED", { fileId, status: "GENERATING" });
 
   let lastError: unknown = null;
+  let lastSddDiagnostics: SddGenerationDiagnostics | null = null;
   for (const attempt of [1, 2, 3]) {
     try {
       const generated = await runSingleFileGeneration(meta, fileId, attempt);
       await writeFileBody(meta.workspacePath, meta.runId, fileId, generated.content);
       if (fileId === "08") {
-        let constraints: SddConstraints;
-        try {
-          constraints = extractSddConstraintsFromMarkdown(generated.content);
-        } catch (parseError) {
-          constraints = await recoverSddConstraintsByLlm(meta, generated.content, parseError);
-          await appendEventLog(meta.workspacePath, meta.runId, "SDD_CONSTRAINTS_RECOVERED", {
-            fileId,
-            reason: parseError instanceof Error ? parseError.message : String(parseError),
-          });
+        if (!generated.sddDiagnostics) {
+          throw new Error("SDD诊断信息缺失");
         }
-        await writeJson(getSddConstraintsPath(meta.workspacePath, meta.runId), constraints);
+        lastSddDiagnostics = generated.sddDiagnostics;
+        await writeJson(getSddConstraintsPath(meta.workspacePath, meta.runId), generated.sddDiagnostics.constraints);
         await appendEventLog(meta.workspacePath, meta.runId, "SDD_CONSTRAINTS_EXTRACTED", {
           fileId,
-          version: constraints.version,
-          apis: constraints.apis.length,
-          tables: constraints.tables.length,
-          stateMachines: constraints.stateMachines.length,
+          version: generated.sddDiagnostics.constraints.version,
+          apis: generated.sddDiagnostics.constraints.apis.length,
+          tables: generated.sddDiagnostics.constraints.tables.length,
+          stateMachines: generated.sddDiagnostics.constraints.stateMachines.length,
         });
-        const validation = await validateSddGate(meta, constraints);
-        await writeJson(getSddValidationPath(meta.workspacePath, meta.runId), validation);
+        await writeJson(getSddValidationPath(meta.workspacePath, meta.runId), generated.sddDiagnostics.gateResult);
         await appendEventLog(meta.workspacePath, meta.runId, "SDD_GATE_VALIDATED", {
           fileId,
-          passed: validation.passed,
-          conflicts: (validation.conflicts ?? []).length,
+          passed: generated.sddDiagnostics.gateResult.passed,
+          conflicts: (generated.sddDiagnostics.gateResult.conflicts ?? []).length,
         });
-        if (!validation.passed) {
-          const top = (validation.conflicts ?? []).slice(0, 5).map((c) => c.message).join("；");
-          throw new Error(`SDD Gate 校验未通过：${top || "存在一致性冲突"}`);
-        }
       }
 
       const nextStatus: FileRunStatus = "GENERATED";
@@ -1323,6 +1696,43 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
       return meta;
     } catch (error) {
       lastError = error;
+      const sddDiagnostics = (error as { sddDiagnostics?: SddGenerationDiagnostics }).sddDiagnostics ?? null;
+      if (fileId === "08" && sddDiagnostics) {
+        lastSddDiagnostics = sddDiagnostics;
+        await writeJson(getSddPrecheckPath(meta.workspacePath, meta.runId), sddDiagnostics.precheck);
+        await writeJson(getSddGateInputPath(meta.workspacePath, meta.runId), sddDiagnostics.gateInput);
+        await writeJson(getSddGateResultPath(meta.workspacePath, meta.runId), sddDiagnostics.gateResult);
+        const top3 = (sddDiagnostics.gateResult.conflicts ?? [])
+          .slice(0, 3)
+          .map((item) => `${item.message}${item.location ? ` @${item.location}` : ""}`)
+          .join("；");
+        const suggested = (sddDiagnostics.gateResult.conflicts ?? [])
+          .slice(0, 3)
+          .map((item) => item.suggestion)
+          .filter(Boolean)
+          .join("；");
+        await appendEventLog(meta.workspacePath, meta.runId, "SDD_FAILURE_SUMMARY", {
+          fileId,
+          top3: top3 || "无",
+          suggestion: suggested || "请先修正01-07后重试",
+        });
+      } else if (fileId === "08") {
+        const message = error instanceof Error ? error.message : String(error);
+        const lowered = message.toLowerCase();
+        const networkLike =
+          lowered.includes("connection error") ||
+          lowered.includes("timeout") ||
+          lowered.includes("timed out") ||
+          lowered.includes("econn") ||
+          lowered.includes("socket hang up");
+        await appendEventLog(meta.workspacePath, meta.runId, "SDD_FAILURE_SUMMARY", {
+          fileId,
+          top3: message || "SDD生成失败",
+          suggestion: networkLike
+            ? "检查LLM baseUrl/apiKey与网络连通性后重试"
+            : "查看FILE_FAILED与LLM响应详情后重试",
+        });
+      }
       const message = error instanceof Error ? error.message : String(error);
       upsertFileState(meta, fileId, {
         status: "FAILED",
