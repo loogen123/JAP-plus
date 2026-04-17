@@ -1395,6 +1395,11 @@ export async function tryGenerateWithMcp(
   fileId: FileId,
   approvedSummary: string,
 ): Promise<{ content: string; toolName: string } | null> {
+  // 在云端测试环境强制禁用 MCP，避免 npx 下载卡死
+  if (process.env.DISABLE_MCP === "true") {
+    return null;
+  }
+
   try {
     const client = await JapMcpClient.getSharedClient(meta.workspacePath);
     const result = await client.callTextToolByCandidates(
