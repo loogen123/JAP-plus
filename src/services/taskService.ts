@@ -1283,13 +1283,13 @@ async function validateSddGate(
 async function loadSddEvidence(meta: FileRunMeta): Promise<string> {
   // SDD 作为最终交付物，需要尽可能基于 01~07 的实际产物做一致性约束；因此这里将已生成文件正文按片段注入提示词，减少模型编造与前后矛盾。
   const maxCharsByFile: Partial<Record<FileId, number>> = {
-    "01": 2500,
-    "02": 3500,
-    "03": 3000,
-    "04": 3000,
-    "05": 2200,
-    "06": 2200,
-    "07": 2200,
+    "01": 5000,
+    "02": 8000,
+    "03": 6000,
+    "04": 12000,
+    "05": 5000,
+    "06": 5000,
+    "07": 5000,
   };
 
   const blocks: string[] = [];
@@ -1430,28 +1430,45 @@ async function generateSddConstraintsDraft(
   const qa = buildQASnapshot(meta);
   const evidence = await loadSddEvidence(meta);
   const requirement = fallbackContextOnly ? clampText(meta.requirement, 6000) : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
+
+  // --- 新增：硬性提取 02 和 04 的约束列表，喂给大模型防止幻觉遗漏 ---
+  const domainModelText = await readFileBody(meta.workspacePath, meta.runId, "02").catch(() => "");
+  const openApiText = await readFileBody(meta.workspacePath, meta.runId, "04").catch(() => "");
+  
+  // 提取表名
+  const tableMap = parseTableColumns(domainModelText);
+  const hardcodedTables = Array.from(tableMap.keys());
+  
+  // 提取 API
+  const apiSet = parseOpenApiSignatures(openApiText);
+  const hardcodedApis = Array.from(apiSet);
+
   const payload = {
     requirement,
     approvedSummary: clampText(approvedSummary, 12000),
-    evidence: clampText(evidence, 14000),
+    evidence: clampText(evidence, 36000),
     qa: clampText(qa, 3000),
     skill: clampText(skill, 1800),
+    HARD_CONSTRAINTS: {
+      MUST_INCLUDE_TABLES: hardcodedTables,
+      MUST_INCLUDE_APIS: hardcodedApis
+    }
   };
+
+  const systemPrompt = `仅输出SDD约束JSON，字段必须严格符合schema，要求与现有01-07内容一致；不要输出markdown或解释。
+非常重要：你必须确保生成的 JSON 中，tables 数组完全包含 payload.HARD_CONSTRAINTS.MUST_INCLUDE_TABLES 里的所有表；apis 数组完全包含 payload.HARD_CONSTRAINTS.MUST_INCLUDE_APIS 里的所有接口！一个都不能少！`;
+
   const { result } = await invokeStructuredWithJsonFallback<SddConstraints>({
     invokeStructured: async () =>
       SddConstraintsSchema.parse(
         await structured.invoke([
-          new SystemMessage(
-            "仅输出SDD约束JSON，字段必须严格符合schema，要求与现有01-07内容一致；不要输出markdown或解释。",
-          ),
+          new SystemMessage(systemPrompt),
           new HumanMessage(JSON.stringify(payload)),
         ]),
       ),
     invokeFallback: () =>
       model.invoke([
-        new SystemMessage(
-          "仅输出SDD约束JSON，字段必须包含version/apis/tables/stateMachines，且与01-07一致。",
-        ),
+        new SystemMessage(systemPrompt),
         new HumanMessage(JSON.stringify(payload)),
       ]),
     safeParse: (value) => SddConstraintsSchema.safeParse(value),
