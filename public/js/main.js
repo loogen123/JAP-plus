@@ -56,6 +56,8 @@
     let isGeneratingSdd = false;
     let refreshInFlight = false;
     let refreshQueued = false;
+    let refreshDebounceTimer = null;
+    let filePreviewDirty = false;
     const recentPrintedEventKeys = new Set();
 
     function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
@@ -192,7 +194,19 @@
     function connectWebSocketForTask(taskId){ currentTaskId=taskId||null; connectWebSocket(currentTaskId); }
 
     function esc(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll("\"","&quot;").replaceAll("'","&#39;"); }
-    function addLog(tag,msg,level="info"){ const root=document.getElementById("logContainer"); const color=level==="success"?"#2c9a58":level==="error"?"#d35a68":"#5673a0"; const line=document.createElement("div"); line.className="log-line"; line.innerHTML=`<span style="color:#7f8ca5;margin-right:8px;">[${new Date().toLocaleTimeString()}]</span><span style="color:${color};font-weight:700;">${esc(tag)}</span> ${esc(msg)}`; root.appendChild(line); root.scrollTop=root.scrollHeight; }
+    function addLog(tag,msg,level="info"){ 
+      const root=document.getElementById("logContainer"); 
+      const color=level==="success"?"#2c9a58":level==="error"?"#d35a68":"#5673a0"; 
+      const line=document.createElement("div"); 
+      line.className="log-line"; 
+      line.innerHTML=`<span style="color:#7f8ca5;margin-right:8px;">[${new Date().toLocaleTimeString()}]</span><span style="color:${color};font-weight:700;">${esc(tag)}</span> ${esc(msg)}`; 
+      root.appendChild(line); 
+      // phase-d limit log size
+      if(root.childElementCount > 1000) {
+        root.removeChild(root.firstElementChild);
+      }
+      root.scrollTop=root.scrollHeight; 
+    }
     function buildSddErrorMessage(data){
       const code = data?.errorCode || "SDD_GENERATION_FAILED";
       const stage = data?.stage || "DETAILING";
@@ -704,6 +718,11 @@
     }
     function openFileReviewModal(){ document.getElementById("fileReviewModal").classList.add("show"); }
     function closeFileReviewModal(){ document.getElementById("fileReviewModal").classList.remove("show"); }
+
+    document.getElementById("filePreview").addEventListener("input", function() {
+      filePreviewDirty = true;
+      document.getElementById("btnSaveEdit").disabled = false;
+    });
 
     function toggleAutoRun() {
       if(isAutoRunning) {
@@ -1362,7 +1381,9 @@
         const resp = await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/files/${encodeURIComponent(fileId)}/content${query}`,{ cache:"no-store" });
         if(resp.ok) {
           const data = await resp.json();
-          document.getElementById("filePreview").value = data.content || "";
+          if (!filePreviewDirty) {
+            document.getElementById("filePreview").value = data.content || "";
+          }
         }
       } catch (e) {
         console.error("Failed to load file content", e);
@@ -1375,7 +1396,7 @@
         }
       }
     }
-    async function refreshFilewiseRun(){
+    async function _doRefreshFilewiseRun(){
       if(!currentRunId) return;
       if(refreshInFlight){
         refreshQueued = true;
@@ -1396,7 +1417,6 @@
           }
           currentRunState = data;
           currentTaskId = data.runId;
-          await pullRecentEvents(200);
           setTaskIdentity(data.runId, document.getElementById("sourceTaskId").textContent || "--");
           activateState(mapFilewiseStageToUi(data.stage));
           updateFileTree(data.files || []);
@@ -1419,7 +1439,9 @@
             const needsReview = currentFileRec && (currentFileRec.status === "GENERATED" || currentFileRec.status === "REVIEWING" || currentFileRec.status === "REJECTED");
             
             if (data.currentFileContent !== undefined) {
-              document.getElementById("filePreview").value = data.currentFileContent || "";
+              if (!filePreviewDirty) {
+                document.getElementById("filePreview").value = data.currentFileContent || "";
+              }
               if (needsReview && !isAutoRunning) {
                 openFileReviewModal();
               } else if (!needsReview) {
@@ -1428,7 +1450,7 @@
             } else {
               // No content provided in summary response. Fetch if we are switching to it, or if we need to review it.
               if (selectedFileId !== data.currentFile || (needsReview && !isAutoRunning && document.getElementById("filePreview").value === "")) {
-                selectPipelineFile(data.currentFile);
+                await selectPipelineFile(data.currentFile);
               } else {
                 if (needsReview && !isAutoRunning) {
                   openFileReviewModal();
@@ -1451,6 +1473,15 @@
       } finally {
         refreshInFlight = false;
       }
+    }
+
+    function refreshFilewiseRun() {
+      if (refreshDebounceTimer) {
+        clearTimeout(refreshDebounceTimer);
+      }
+      refreshDebounceTimer = setTimeout(() => {
+        _doRefreshFilewiseRun();
+      }, 500);
     }
     async function filewiseGenerateBaseNext(){
       if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
@@ -1600,6 +1631,8 @@
       const data=await resp.json();
       if(!resp.ok){ addLog("错误",data?.message||"保存失败","error"); return; }
       currentRunState = data;
+      addLog("系统",`文件 ${fileId} 修改已保存`,"success");
+      filePreviewDirty = false;
       await refreshFilewiseRun();
     }
     async function startDesignOnly(){
