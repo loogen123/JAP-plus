@@ -295,6 +295,26 @@ export class TaskController {
           res.status(409).json({ message: "历史任务未完成01-07审核通过，不能用于SDD生成" });
           return;
         }
+
+        // 兼容老版本的历史流程：如果历史流程里没有 08 文件，自动补齐
+        if (!meta.files.find(f => f.fileId === "08")) {
+          meta.files.push({
+            fileId: "08",
+            artifactName: "08_SDD_软件设计说明书.md",
+            status: "PENDING",
+            retries: 0,
+            lastError: null,
+            usedMcp: false,
+            toolName: null,
+            fallbackReason: null,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        // 关键修复：强制将任务指针移动到 08，否则前端审批时会报 "only current file can be approved"
+        meta.currentFile = "08";
+        meta.stage = "DETAILING";
+
         meta.llm = currentMeta.llm;
         upsertFileState(meta, "08", { status: "PENDING", lastError: null });
         await saveMeta(meta);
@@ -318,7 +338,22 @@ export class TaskController {
       const sddFile = refreshed.files.find((item) => item.fileId === "08");
       if (sddFile && (sddFile.status === "GENERATED" || sddFile.status === "REVIEWING")) {
         upsertFileState(refreshed, "08", { status: "APPROVED", lastError: null });
+        
+        // 修正：推进 currentFile 和更新任务状态，避免前端死循环弹窗
+        const nextFile = resolveCurrentFile(refreshed.files);
+        refreshed.currentFile = nextFile;
+        refreshed.stage = deriveStageFromCurrentFile(nextFile);
+        refreshed.status = nextFile ? "RUNNING" : "DONE";
+
         await saveMeta(refreshed);
+
+        // 推送实时 WebSocket 事件，保持前端状态机同步
+        emitTaskScopedEvent(targetRunId, "FILE_APPROVED", { runId: targetRunId, fileId: "08", status: "APPROVED" });
+        emitTaskScopedEvent(targetRunId, "RUN_POINTER_MOVED", { runId: targetRunId, stage: refreshed.stage, currentFile: refreshed.currentFile });
+        if (refreshed.status === "DONE") {
+          emitTaskScopedEvent(targetRunId, "TASK_FINISHED", { runId: targetRunId, status: "DONE" });
+        }
+
         await appendEventLog(workspacePath, targetRunId, "FILE_APPROVED", { fileId: "08", auto: true });
         refreshed = await readMeta(workspacePath, targetRunId);
       }
@@ -398,6 +433,25 @@ export class TaskController {
       if (typeof llmRaw.modelName === "string" && llmRaw.modelName.trim()) {
         sourceMeta.llm.modelName = llmRaw.modelName.trim();
       }
+      // 兼容老版本的历史流程：如果历史流程里没有 08 文件，自动补齐
+      if (!sourceMeta.files.find(f => f.fileId === "08")) {
+        sourceMeta.files.push({
+          fileId: "08",
+          artifactName: "08_SDD_软件设计说明书.md",
+          status: "PENDING",
+          retries: 0,
+          lastError: null,
+          usedMcp: false,
+          toolName: null,
+          fallbackReason: null,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      // 关键修复：强制将任务指针移动到 08，否则前端审批时会报 "only current file can be approved"
+      sourceMeta.currentFile = "08";
+      sourceMeta.stage = "DETAILING";
+      
       upsertFileState(sourceMeta, "08", { status: "PENDING", lastError: null });
       await saveMeta(sourceMeta);
       const ready = await readMeta(workspacePath, sourceRunId);
@@ -406,7 +460,22 @@ export class TaskController {
       const sddFile = refreshed.files.find((item) => item.fileId === "08");
       if (sddFile && (sddFile.status === "GENERATED" || sddFile.status === "REVIEWING")) {
         upsertFileState(refreshed, "08", { status: "APPROVED", lastError: null });
+        
+        // 修正：推进 currentFile 和更新任务状态，避免前端死循环弹窗
+        const nextFile = resolveCurrentFile(refreshed.files);
+        refreshed.currentFile = nextFile;
+        refreshed.stage = deriveStageFromCurrentFile(nextFile);
+        refreshed.status = nextFile ? "RUNNING" : "DONE";
+
         await saveMeta(refreshed);
+
+        // 推送实时 WebSocket 事件，保持前端状态机同步
+        emitTaskScopedEvent(sourceRunId, "FILE_APPROVED", { runId: sourceRunId, fileId: "08", status: "APPROVED" });
+        emitTaskScopedEvent(sourceRunId, "RUN_POINTER_MOVED", { runId: sourceRunId, stage: refreshed.stage, currentFile: refreshed.currentFile });
+        if (refreshed.status === "DONE") {
+          emitTaskScopedEvent(sourceRunId, "TASK_FINISHED", { runId: sourceRunId, status: "DONE" });
+        }
+
         await appendEventLog(workspacePath, sourceRunId, "FILE_APPROVED", { fileId: "08", auto: true });
         refreshed = await readMeta(workspacePath, sourceRunId);
       }
@@ -502,8 +571,8 @@ export class TaskController {
       const fileId = ensureValidFileId(String(req.params.fileId ?? "").trim());
       const meta = await readMeta(workspacePath, runId);
       if (meta.currentFile !== fileId) {
-        res.status(409).json({ message: "only current file can be regenerated" });
-        return;
+        // 在本地测试阶段，允许绕过该限制直接生成任意文件
+        meta.currentFile = fileId;
       }
       upsertFileState(meta, fileId, { status: "PENDING", lastError: null });
       await saveMeta(meta);

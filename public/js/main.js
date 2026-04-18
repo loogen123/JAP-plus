@@ -50,6 +50,7 @@
     let selectedSddSourceRunId = null;
     let recentEventLastAt = "";
     let sddHeartbeatTimer = null;
+    let lastSddGateLogKey = "";
 
     function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
     function normalizeAnswersForApi(){
@@ -327,6 +328,18 @@
         refreshFilewiseRun();
         return;
       }
+      if(event.type==="FILE_GENERATING"){
+        const d=event?.data||{};
+        addLog("文件",`${d.fileId||"--"} 正在生成...`,"info");
+        refreshFilewiseRun();
+        return;
+      }
+      if(event.type==="FILE_REGENERATE_REQUESTED"){
+        const d=event?.data||{};
+        addLog("文件",`${d.fileId||"--"} 请求重新生成...`,"info");
+        refreshFilewiseRun();
+        return;
+      }
       if(event.type==="FILE_REJECTED"){
         const d=event?.data||{};
         addLog("文件",`${d.fileId||"--"} 已驳回${d.reason?`，原因：${d.reason}`:""}`,"error");
@@ -341,7 +354,24 @@
       }
     }
 
-    function buildTaskLlmConfig(){ const baseUrl=(document.getElementById("llmBaseUrl").value||"").trim(); const apiKey=(document.getElementById("llmApiKey").value||"").trim(); const modelName=(document.getElementById("llmModelName").value||"").trim(); const cached=getSessionLlmConfig(); const cfg={ baseUrl:baseUrl||cached?.baseUrl||"https://api.deepseek.com", apiKey:apiKey||cached?.apiKey||"", modelName:modelName||cached?.modelName||"deepseek-chat" }; if(!cfg.apiKey) return null; setSessionLlmConfig(cfg); return cfg; }
+    function buildTaskLlmConfig() {
+      const baseUrl = (document.getElementById("llmBaseUrl").value || "").trim();
+      const apiKey = (document.getElementById("llmApiKey").value || "").trim();
+      const modelName = (document.getElementById("llmModelName").value || "").trim();
+      const cached = getSessionLlmConfig();
+      const cfg = {
+        baseUrl: baseUrl || cached?.baseUrl || "https://api.deepseek.com",
+        apiKey: apiKey || cached?.apiKey || "",
+        modelName: modelName || cached?.modelName || "deepseek-chat"
+      };
+      if (!cfg.apiKey) {
+        updateLlmChip(false);
+        return null;
+      }
+      setSessionLlmConfig(cfg);
+      updateLlmChip(true);
+      return cfg;
+    }
 
     function validateWorkspace(){ const p=(document.getElementById("workspacePath").value||"").trim(); if(!p){ document.getElementById("workspaceStatus").textContent="未设置"; document.getElementById("workspacePathLabel").textContent="output"; setWorkspacePathConfig(""); return; } document.getElementById("workspaceStatus").textContent=`当前目录：${p}`; document.getElementById("workspacePathLabel").textContent=p; setWorkspacePathConfig(p); }
       function saveSettings(){ const llm=buildTaskLlmConfig(); if(!llm){ addLog("错误","保存失败：API Key 不能为空","error"); return; } const mode=(document.getElementById("elicitationMode").value||"quick").trim(); setElicitationMode(mode); const showIntermediate = Boolean(document.getElementById("showIntermediateArtifacts")?.checked); setShowIntermediateArtifacts(showIntermediate); updateLlmChip(true); validateWorkspace(); closeSettings(); if(currentRunState?.files) updateFileTree(currentRunState.files); addLog("系统",`设置已保存（澄清模式：${mode==="deep"?"深度":"快速"}）`,"success"); }
@@ -754,41 +784,51 @@
       addLog("系统",`已开始生成SDD，历史流程=${selectedSddSourceRunId}`);
       startSddHeartbeat();
       try{
-        if(currentRunId){
-          addLog("系统",`在当前任务 ${currentRunId} 上导入历史1-7并生成SDD...`);
-          await filewiseGenerateSdd(selectedSddSourceRunId);
-          addLog("系统","SDD生成流程已提交完成","success");
-        } else {
-          const llm=buildTaskLlmConfig();
-          if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
-          const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-          addLog("系统","正在基于历史流程创建任务并生成SDD...");
-          const resp=await fetch(API_BASE+"/api/v1/tasks/filewise/generate-sdd-from-source",{
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({
-              sourceRunId: selectedSddSourceRunId,
-              llm,
-              workspace: workspacePath ? {path:workspacePath} : undefined
-            })
-          });
-          const data=await resp.json();
-          if(!resp.ok){
-            addLog("错误",buildSddErrorMessage(data),"error");
-            await pullRecentEvents(200);
-            stopSddHeartbeat();
-            return;
-          }
-          currentRunId = data.runId;
-          currentTaskId = data.runId;
-          currentRunState = data;
-          recentEventLastAt = data?.lastEventAt || recentEventLastAt;
-          setTaskIdentity(currentRunId, selectedSddSourceRunId);
-          connectWebSocketForTask(currentRunId);
-          await refreshFilewiseRun();
-          addLog("系统",`SDD生成完成，任务ID=${currentRunId}`,"success");
-        }
-      } catch (error) {
+    if(currentRunId){
+      addLog("系统",`在当前任务 ${currentRunId} 上导入历史1-7并生成SDD...`);
+      await filewiseGenerateSdd(selectedSddSourceRunId);
+      addLog("系统","SDD生成流程已提交完成","success");
+    } else {
+      const llm=buildTaskLlmConfig();
+      if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      addLog("系统","正在基于历史流程创建任务并生成SDD...");
+      
+      // 提前绑定当前任务并连接 WS，以便能接收到生成过程中的中间日志
+      currentRunId = selectedSddSourceRunId;
+      currentTaskId = selectedSddSourceRunId;
+      setTaskIdentity(currentRunId, selectedSddSourceRunId);
+      connectWebSocketForTask(currentRunId);
+      
+      const sddBtn = document.getElementById("btnGenerateSdd");
+      const baseBtn = document.getElementById("btnGenerateBase");
+      const autoBtn = document.getElementById("btnAutoRun");
+      if(sddBtn) { sddBtn.disabled = true; sddBtn.innerText = "生成中..."; }
+      if(baseBtn) baseBtn.disabled = true;
+      if(autoBtn) autoBtn.disabled = true;
+
+      const resp=await fetch(API_BASE+"/api/v1/tasks/filewise/generate-sdd-from-source",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          sourceRunId: selectedSddSourceRunId,
+          llm,
+          workspace: workspacePath ? {path:workspacePath} : undefined
+        })
+      });
+      const data=await resp.json();
+      if(!resp.ok){
+        addLog("错误",buildSddErrorMessage(data),"error");
+        await pullRecentEvents(200);
+        stopSddHeartbeat();
+        return;
+      }
+      currentRunState = data;
+      recentEventLastAt = data?.lastEventAt || recentEventLastAt;
+      await refreshFilewiseRun();
+      addLog("系统",`SDD生成完成，任务ID=${currentRunId}`,"success");
+    }
+  } catch (error) {
         addLog("错误",`SDD生成异常：${String(error?.message||error)}`,"error");
         await pullRecentEvents(200);
         stopSddHeartbeat();
@@ -1253,7 +1293,13 @@
         const conflicts = Array.isArray(data.sdd.validation.conflicts) ? data.sdd.validation.conflicts : [];
         const head = conflicts.slice(0, 3).map((c) => `${c.message || ""}${c.location ? ` @${c.location}` : ""}`).filter(Boolean).join("；");
         const action = conflicts.slice(0, 3).map((c) => c.suggestion).filter(Boolean).join("；");
-        addLog("SDD Gate", `未通过：${head || "存在一致性冲突"} | 建议：${action || "先修正01-07后重试"}`, "error");
+        const gateLogKey = `${data.runId || ""}|${head}|${action}`;
+        if (lastSddGateLogKey !== gateLogKey) {
+          addLog("SDD Gate", `未通过：${head || "存在一致性冲突"} | 建议：${action || "先修正01-07后重试"}`, "error");
+          lastSddGateLogKey = gateLogKey;
+        }
+      } else {
+        lastSddGateLogKey = "";
       }
       if(data.currentFile){
         document.getElementById("previewName").textContent = data.currentFile;
@@ -1296,31 +1342,57 @@
     }
     async function filewiseGenerateSdd(sourceRunId){
       if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
+      const llm = buildTaskLlmConfig();
+      if(!llm){ 
+        addLog("错误","请先在设置中配置 API Key","error"); 
+        openSettings(); 
+        return; 
+      }
+
+      const sddBtn = document.getElementById("btnGenerateSdd");
+      const baseBtn = document.getElementById("btnGenerateBase");
+      const autoBtn = document.getElementById("btnAutoRun");
+      const originalSddText = sddBtn ? sddBtn.innerText : "生成SDD文件";
+
+      if(sddBtn) { sddBtn.disabled = true; sddBtn.innerText = "生成中..."; }
+      if(baseBtn) baseBtn.disabled = true;
+      if(autoBtn) autoBtn.disabled = true;
+
       startSddHeartbeat();
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-      const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-sdd`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          sourceRunId: sourceRunId || undefined,
-          workspace: workspacePath ? {path:workspacePath} : undefined
-        })
-      });
-      const data=await resp.json();
-      if(!resp.ok){
-        addLog("错误",buildSddErrorMessage(data),"error");
-        await pullRecentEvents(200);
+      addLog("系统","正在生成SDD...");
+      
+      try {
+        const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-sdd`,{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            sourceRunId: sourceRunId || undefined,
+            workspace: workspacePath ? {path:workspacePath} : undefined
+          })
+        });
+        const data=await resp.json();
+        if(!resp.ok){
+          addLog("错误",buildSddErrorMessage(data),"error");
+          await pullRecentEvents(200);
+          stopSddHeartbeat();
+          return;
+        }
+        if(data?.runId){
+          currentRunId = data.runId;
+          currentTaskId = data.runId;
+          setTaskIdentity(currentRunId, sourceRunId || document.getElementById("sourceTaskId").textContent || "--");
+          connectWebSocketForTask(currentRunId);
+        }
+        currentRunState = data;
+        await refreshFilewiseRun();
+      } catch (err) {
+        addLog("错误","生成SDD请求异常: " + err.message, "error");
         stopSddHeartbeat();
-        return;
+      } finally {
+        if(sddBtn) { sddBtn.innerText = originalSddText; }
+        // 按钮 disabled 状态会由 refreshFilewiseRun() 里的 renderFilewiseList() 自动恢复
       }
-      if(data?.runId){
-        currentRunId = data.runId;
-        currentTaskId = data.runId;
-        setTaskIdentity(currentRunId, sourceRunId || document.getElementById("sourceTaskId").textContent || "--");
-        connectWebSocketForTask(currentRunId);
-      }
-      currentRunState = data;
-      await refreshFilewiseRun();
     }
     async function filewiseGenerateNext(){
       if(currentRunState?.currentFile === "08"){
@@ -1450,10 +1522,39 @@
 
     document.addEventListener("DOMContentLoaded",()=>{
       document.getElementById("businessGoalInput").addEventListener("input", refreshDesignButtonState);
-      document.getElementById("llmApiKey").addEventListener("input", refreshDesignButtonState);
+      document.getElementById("llmApiKey").addEventListener("input", () => {
+        refreshDesignButtonState();
+        updateLlmChip(document.getElementById("llmApiKey").value.trim().length > 0);
+      });
       document.getElementById("llmBaseUrl").addEventListener("input", refreshDesignButtonState);
       document.getElementById("llmModelName").addEventListener("input", refreshDesignButtonState);
       document.getElementById("filePreview").addEventListener("input", updateFileActionButtons);
+
+      // 针对浏览器按需自动填充（Autofill on interaction）的检测机制
+      const checkAutofill = () => {
+        const apiKeyInput = document.getElementById("llmApiKey");
+        if (apiKeyInput && apiKeyInput.value.trim().length > 0) {
+          updateLlmChip(true);
+          refreshDesignButtonState();
+          return true;
+        }
+        return false;
+      };
+      
+      // 初始轮询 2 秒 (应对立即填充的浏览器)
+      let autofillCheckCount = 0;
+      const autofillInterval = setInterval(() => {
+        if (checkAutofill() || ++autofillCheckCount > 4) clearInterval(autofillInterval);
+      }, 500);
+
+      // 监听用户首次交互 (应对 Chrome 交互后才填充的安全机制)
+      const interactionEvents = ['click', 'focusin', 'keydown', 'mousemove'];
+      const onInteract = () => {
+        if (checkAutofill()) {
+          interactionEvents.forEach(e => document.removeEventListener(e, onInteract));
+        }
+      };
+      interactionEvents.forEach(e => document.addEventListener(e, onInteract, { passive: true }));
 
       loadSettings();
       setTaskIdentity("--","--");
