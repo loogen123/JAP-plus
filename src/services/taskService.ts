@@ -592,6 +592,56 @@ export type RunEventRecord = {
   [key: string]: unknown;
 };
 
+export async function readRunEventsOffset(workspacePath: string, runId: string, offsetByte: number, limit = 500): Promise<{ events: RunEventRecord[], nextCursor: number }> {
+  const paths = getRunPaths(workspacePath, runId);
+  const out: RunEventRecord[] = [];
+  let nextCursor = offsetByte;
+  try {
+    const stat = await fs.stat(paths.eventsPath);
+    if (offsetByte >= stat.size) {
+      return { events: [], nextCursor: stat.size };
+    }
+    const stream = (await import("fs")).createReadStream(paths.eventsPath, { start: offsetByte, encoding: "utf-8" });
+    const rl = (await import("readline")).createInterface({
+      input: stream,
+      crlfDelay: Infinity
+    });
+    for await (const line of rl) {
+      nextCursor += Buffer.byteLength(line, "utf-8") + 1; // +1 for newline
+      if (line.trim()) {
+        try {
+          const parsed = JSON.parse(line) as Record<string, unknown>;
+          if (typeof parsed.type === "string") {
+            out.push({
+              at: typeof parsed.at === "string" ? parsed.at : nowIso(),
+              runId: typeof parsed.runId === "string" ? parsed.runId : runId,
+              type: parsed.type,
+              ...parsed,
+            });
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+      if (out.length >= limit) {
+        rl.close();
+        stream.destroy();
+        break;
+      }
+    }
+    // If we read everything, align nextCursor to stat.size to be safe
+    if (out.length < limit) {
+       nextCursor = stat.size;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { events: [], nextCursor: 0 };
+    }
+    throw error;
+  }
+  return { events: out, nextCursor };
+}
+
 export async function readRunEventsTail(workspacePath: string, runId: string, tail: number): Promise<RunEventRecord[]> {
   const paths = getRunPaths(workspacePath, runId);
   let raw = "";

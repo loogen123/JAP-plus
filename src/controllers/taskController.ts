@@ -23,6 +23,7 @@ import {
   readSddGateValidation,
   listSddSourceRuns,
   readRunEventsTail,
+  readRunEventsOffset,
   getRunLastEventAt,
 } from "../services/taskService.js";
 import { emitTaskScopedEvent } from "../runtime/workflowEvents.js";
@@ -208,16 +209,26 @@ export class TaskController {
   async getFilewiseEvents(req: Request, res: Response) {
     const runId = String(req.params.runId ?? "").trim();
     const workspacePath = resolveWorkspacePath(req.query.workspace ?? req.query.workspacePath ?? req.body?.workspace);
+    const cursor = Number(req.query.cursor);
     const tailRaw = Number(req.query.tail ?? 200);
     const tail = Number.isFinite(tailRaw) ? Math.max(1, Math.min(1000, Math.floor(tailRaw))) : 200;
+    
     if (!runId) {
       res.status(400).json({ message: "runId is required" });
       return;
     }
+    
     try {
-      const events = await readRunEventsTail(workspacePath, runId, tail);
-      const lastEventAt = events.length > 0 ? String(events[events.length - 1]?.at ?? "") : null;
-      res.json({ runId, tail, lastEventAt, events });
+      if (!Number.isNaN(cursor) && cursor >= 0) {
+        const { events, nextCursor } = await readRunEventsOffset(workspacePath, runId, cursor, tail);
+        const lastEventAt = events.length > 0 ? String(events[events.length - 1]?.at ?? "") : null;
+        res.json({ runId, cursor: nextCursor, lastEventAt, events });
+      } else {
+        const events = await readRunEventsTail(workspacePath, runId, tail);
+        const lastEventAt = events.length > 0 ? String(events[events.length - 1]?.at ?? "") : null;
+        const nextCursor = (await import("fs/promises")).stat((await import("../services/taskService.js")).getRunPaths(workspacePath, runId).eventsPath).then(s => s.size).catch(() => 0);
+        res.json({ runId, tail, cursor: await nextCursor, lastEventAt, events });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });
