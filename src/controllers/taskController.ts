@@ -179,6 +179,7 @@ export class TaskController {
   async getFilewiseTask(req: Request, res: Response) {
     const runId = String(req.params.runId ?? "").trim();
     const workspacePath = resolveWorkspacePath(req.query.workspace ?? req.query.workspacePath ?? req.body?.workspace);
+    const includeContent = req.query.includeContent === "true";
     if (!runId) {
       res.status(400).json({ message: "runId is required" });
       return;
@@ -186,19 +187,39 @@ export class TaskController {
     try {
       const meta = await readMeta(workspacePath, runId);
       const runtime = getFileRuntimeRecord(meta);
-      const currentBody = runtime.currentFile
+      const currentBody = (includeContent && runtime.currentFile)
         ? await readFileBody(workspacePath, runId, runtime.currentFile)
-        : "";
+        : undefined;
       const sddConstraints = await readSddConstraints(workspacePath, runId);
       const sddValidation = await readSddGateValidation(workspacePath, runId);
-      res.json({
+      const responseObj: any = {
         ...toFileStatusResponse(meta, workspacePath),
-        currentFileContent: currentBody,
         sdd: {
           constraints: sddConstraints,
           validation: sddValidation,
         },
-      });
+      };
+      if (currentBody !== undefined) {
+        responseObj.currentFileContent = currentBody;
+      }
+      res.json(responseObj);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(404).json({ message });
+    }
+  }
+
+  async getFilewiseFileContent(req: Request, res: Response) {
+    const runId = String(req.params.runId ?? "").trim();
+    const fileId = String(req.params.fileId ?? "").trim();
+    const workspacePath = resolveWorkspacePath(req.query.workspace ?? req.query.workspacePath ?? req.body?.workspace);
+    if (!runId || !fileId) {
+      res.status(400).json({ message: "runId and fileId are required" });
+      return;
+    }
+    try {
+      const content = await readFileBody(workspacePath, runId, fileId as any);
+      res.json({ content });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(404).json({ message });
@@ -210,14 +231,15 @@ export class TaskController {
     const workspacePath = resolveWorkspacePath(req.query.workspace ?? req.query.workspacePath ?? req.body?.workspace);
     const tailRaw = Number(req.query.tail ?? 200);
     const tail = Number.isFinite(tailRaw) ? Math.max(1, Math.min(1000, Math.floor(tailRaw))) : 200;
+    const cursor = Number(req.query.cursor) || 0;
     if (!runId) {
       res.status(400).json({ message: "runId is required" });
       return;
     }
     try {
-      const events = await readRunEventsTail(workspacePath, runId, tail);
+      const { events, nextCursor } = await readRunEventsTail(workspacePath, runId, tail, cursor);
       const lastEventAt = events.length > 0 ? String(events[events.length - 1]?.at ?? "") : null;
-      res.json({ runId, tail, lastEventAt, events });
+      res.json({ runId, tail, cursor, nextCursor, lastEventAt, events });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });

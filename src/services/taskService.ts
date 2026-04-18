@@ -240,14 +240,25 @@ export async function readPreview(filePath: string | null, maxChars: number): Pr
     };
   }
   const stat = await fs.stat(filePath);
-  const content = await fs.readFile(filePath, "utf-8");
-  const truncated = content.length > maxChars;
+  const truncated = stat.size > maxChars;
+  let content = "";
+  if (stat.size > 0) {
+    const bytesToRead = Math.min(stat.size, maxChars * 4); // maxChars is characters, roughly 4 bytes per UTF-8 char max
+    const fd = await fs.open(filePath, "r");
+    const buffer = Buffer.alloc(bytesToRead);
+    const { bytesRead } = await fd.read(buffer, 0, bytesToRead, 0);
+    await fd.close();
+    content = buffer.toString("utf-8", 0, bytesRead);
+    if (content.length > maxChars) {
+      content = content.slice(0, maxChars);
+    }
+  }
   return {
     exists: true,
     path: filePath,
     size: stat.size,
     truncated,
-    content: truncated ? content.slice(0, maxChars) : content,
+    content,
   };
 }
 
@@ -507,8 +518,13 @@ async function isBaseFilesReadyOnDisk(meta: FileRunMeta): Promise<boolean> {
     return false;
   }
   for (const fileId of ["01", "02", "03", "04", "05", "06", "07"] as const) {
-    const body = await readFileBody(meta.workspacePath, meta.runId, fileId);
-    if (!body.trim()) {
+    const filePath = toRunFilePath(meta.workspacePath, meta.runId, fileId);
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.size === 0) {
+        return false;
+      }
+    } catch {
       return false;
     }
   }
@@ -522,8 +538,8 @@ export async function listSddSourceRuns(
   const tasksDir = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks"));
   const runIds = await listDirectoryNames(tasksDir);
   const rows: SddSourceRunSummary[] = [];
-  for (const runId of runIds) {
-    if (!runId || runId === currentRunId) continue;
+  const promises = runIds.map(async (runId) => {
+    if (!runId || runId === currentRunId) return;
     try {
       const meta = await readMeta(workspacePath, runId);
       const baseReady = await isBaseFilesReadyOnDisk(meta);
@@ -537,9 +553,10 @@ export async function listSddSourceRuns(
         baseReady,
       });
     } catch {
-      continue;
+      // ignore
     }
-  }
+  });
+  await Promise.all(promises);
   return rows
     .filter((item) => item.baseReady)
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
@@ -592,20 +609,31 @@ export type RunEventRecord = {
   [key: string]: unknown;
 };
 
-export async function readRunEventsTail(workspacePath: string, runId: string, tail: number): Promise<RunEventRecord[]> {
+export async function readRunEventsTail(workspacePath: string, runId: string, tail: number, cursor: number = 0): Promise<{ events: RunEventRecord[], nextCursor: number }> {
   const paths = getRunPaths(workspacePath, runId);
   let raw = "";
+  let nextCursor = 0;
   try {
-    raw = await fs.readFile(paths.eventsPath, "utf-8");
+    const stats = await fs.stat(paths.eventsPath);
+    nextCursor = stats.size;
+    if (cursor > 0 && cursor <= stats.size) {
+      const fd = await fs.open(paths.eventsPath, "r");
+      const buffer = Buffer.alloc(stats.size - cursor);
+      await fd.read(buffer, 0, buffer.length, cursor);
+      await fd.close();
+      raw = buffer.toString("utf-8");
+    } else {
+      raw = await fs.readFile(paths.eventsPath, "utf-8");
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
+      return { events: [], nextCursor: 0 };
     }
     throw error;
   }
   const normalizedTail = Number.isFinite(tail) ? Math.max(1, Math.min(1000, Math.floor(tail))) : 200;
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const slice = lines.slice(-normalizedTail);
+  const slice = cursor > 0 ? lines : lines.slice(-normalizedTail);
   const out: RunEventRecord[] = [];
   for (const line of slice) {
     try {
@@ -623,11 +651,11 @@ export async function readRunEventsTail(workspacePath: string, runId: string, ta
       continue;
     }
   }
-  return out;
+  return { events: out, nextCursor };
 }
 
 export async function getRunLastEventAt(workspacePath: string, runId: string): Promise<string | null> {
-  const events = await readRunEventsTail(workspacePath, runId, 1);
+  const { events } = await readRunEventsTail(workspacePath, runId, 1);
   return events[0]?.at ?? null;
 }
 

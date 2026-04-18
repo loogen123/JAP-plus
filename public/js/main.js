@@ -49,6 +49,7 @@
     let sddSourceRuns = [];
     let selectedSddSourceRunId = null;
     let recentEventLastAt = "";
+    let recentEventCursor = 0;
     let sddHeartbeatTimer = null;
     let lastSddGateLogKey = "";
     let isGeneratingBase = false;
@@ -239,7 +240,7 @@
     async function pullRecentEvents(tail=200){
       if(!currentRunId) return;
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-      const queryParts = [`tail=${encodeURIComponent(String(tail))}`];
+      const queryParts = [`tail=${encodeURIComponent(String(tail))}`, `cursor=${recentEventCursor}`];
       if(workspacePath) queryParts.push(`workspace=${encodeURIComponent(workspacePath)}`);
       const query = `?${queryParts.join("&")}`;
       const resp = await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/events${query}`,{ cache:"no-store" });
@@ -247,10 +248,13 @@
       if(!resp.ok) return;
       const events = Array.isArray(data?.events) ? data.events : [];
       const latestAt = data?.lastEventAt || "";
+      if(data.nextCursor) {
+        recentEventCursor = data.nextCursor;
+      }
       const hasNew = latestAt && latestAt !== recentEventLastAt;
-      if(hasNew){
-        recentEventLastAt = latestAt;
-        const tailEvents = events.slice(-24);
+      if(hasNew || events.length > 0){
+        recentEventLastAt = latestAt || recentEventLastAt;
+        const tailEvents = events.slice(-24); // Still limit rendering to last 24 if too many arrive at once
         tailEvents.forEach((e)=>renderRecentEventLine(e));
       }
       return data;
@@ -875,6 +879,10 @@
       startSddHeartbeat();
       
       // 提前绑定当前任务并连接 WS，以便能接收到生成过程中的中间日志
+      if(selectedSddSourceRunId !== currentRunId) {
+        recentEventLastAt = "";
+        recentEventCursor = 0;
+      }
       currentRunId = selectedSddSourceRunId;
       currentTaskId = selectedSddSourceRunId;
       setTaskIdentity(currentRunId, selectedSddSourceRunId);
@@ -1033,6 +1041,10 @@
         });
         const data=await resp.json();
         if(!resp.ok){ addLog("错误",data?.message||"从历史任务继续生成失败","error"); return; }
+        if(data.runId !== currentRunId) {
+          recentEventLastAt = "";
+          recentEventCursor = 0;
+        }
         currentRunId = data.runId;
         currentTaskId = data.runId;
         setTaskIdentity(currentRunId, selectedHistoryDetail.id || "--");
@@ -1340,11 +1352,23 @@
       if(stage==="DONE") return "DONE";
       return "STANDBY";
     }
-    function selectPipelineFile(fileId){
+    async function selectPipelineFile(fileId){
       selectedFileId = fileId;
       updateFileTree(currentRunState?.files || []);
+      
+      const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+      const query = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : "";
+      try {
+        const resp = await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/files/${encodeURIComponent(fileId)}/content${query}`,{ cache:"no-store" });
+        if(resp.ok) {
+          const data = await resp.json();
+          document.getElementById("filePreview").value = data.content || "";
+        }
+      } catch (e) {
+        console.error("Failed to load file content", e);
+      }
+
       if(currentRunState?.currentFile===fileId){
-        document.getElementById("filePreview").value = currentRunState?.currentFileContent || "";
         const currentFileRec = currentRunState?.files?.find(f => f.fileId === fileId);
         if(currentFileRec && (currentFileRec.status === "GENERATED" || currentFileRec.status === "REVIEWING" || currentFileRec.status === "REJECTED")) {
           openFileReviewModal();
@@ -1390,14 +1414,28 @@
           }
           if(data.currentFile){
             document.getElementById("previewName").textContent = data.currentFile;
-            document.getElementById("filePreview").value = data.currentFileContent || "";
+            
             const currentFileRec = data.files.find(f => f.fileId === data.currentFile);
-            if (currentFileRec && (currentFileRec.status === "GENERATED" || currentFileRec.status === "REVIEWING" || currentFileRec.status === "REJECTED")) {
-              if(!isAutoRunning) {
+            const needsReview = currentFileRec && (currentFileRec.status === "GENERATED" || currentFileRec.status === "REVIEWING" || currentFileRec.status === "REJECTED");
+            
+            if (data.currentFileContent !== undefined) {
+              document.getElementById("filePreview").value = data.currentFileContent || "";
+              if (needsReview && !isAutoRunning) {
                 openFileReviewModal();
+              } else if (!needsReview) {
+                closeFileReviewModal();
               }
             } else {
-              closeFileReviewModal();
+              // No content provided in summary response. Fetch if we are switching to it, or if we need to review it.
+              if (selectedFileId !== data.currentFile || (needsReview && !isAutoRunning && document.getElementById("filePreview").value === "")) {
+                selectPipelineFile(data.currentFile);
+              } else {
+                if (needsReview && !isAutoRunning) {
+                  openFileReviewModal();
+                } else if (!needsReview) {
+                  closeFileReviewModal();
+                }
+              }
             }
           }else{
             document.getElementById("filePreview").value = "";
@@ -1470,6 +1508,10 @@
           return;
         }
         if(data?.runId){
+          if(data.runId !== currentRunId) {
+            recentEventLastAt = "";
+            recentEventCursor = 0;
+          }
           currentRunId = data.runId;
           currentTaskId = data.runId;
           setTaskIdentity(currentRunId, sourceRunId || document.getElementById("sourceTaskId").textContent || "--");
@@ -1587,6 +1629,10 @@
         });
         const data=await resp.json();
         if(!resp.ok){ addLog("错误",data?.message||"任务提交失败","error"); return; }
+        if(data.runId !== currentRunId) {
+          recentEventLastAt = "";
+          recentEventCursor = 0;
+        }
         currentRunId = data.runId;
         currentTaskId = data.runId;
         currentRunState = null;
