@@ -1700,6 +1700,18 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
   for (const attempt of [1, 2, 3]) {
     try {
       const generated = await runSingleFileGeneration(meta, fileId, attempt);
+      if (fileId === "08") {
+        await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
+          logType: "INFO",
+          title: "系统",
+          summary: "正在落盘 SDD 正文与约束文件...",
+        });
+        emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+          logType: "INFO",
+          title: "系统",
+          summary: "正在落盘 SDD 正文与约束文件...",
+        });
+      }
       await writeFileBody(meta.workspacePath, meta.runId, fileId, generated.content);
       if (fileId === "08") {
         if (!generated.sddDiagnostics) {
@@ -1719,6 +1731,16 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
           fileId,
           passed: generated.sddDiagnostics.gateResult.passed,
           conflicts: (generated.sddDiagnostics.gateResult.conflicts ?? []).length,
+        });
+        await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
+          logType: "INFO",
+          title: "系统",
+          summary: "SDD 诊断结果已写入，准备提交08状态...",
+        });
+        emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+          logType: "INFO",
+          title: "系统",
+          summary: "SDD 诊断结果已写入，准备提交08状态...",
         });
       }
 
