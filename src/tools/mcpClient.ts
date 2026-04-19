@@ -182,6 +182,10 @@ export class JapMcpClient {
     console.info(line);
   }
 
+  static getSharedClientInstance(): JapMcpClient | null {
+    return JapMcpClient.sharedClient;
+  }
+
   static async getSharedClient(allowedDir: string): Promise<JapMcpClient> {
     const normalizedDir = path.resolve(allowedDir);
     if (
@@ -201,8 +205,34 @@ export class JapMcpClient {
     return client;
   }
 
-  private isConnected(): boolean {
+  public isConnected(): boolean {
     return this.clients.length > 0;
+  }
+
+  public async hasFileGenerationTools(): Promise<boolean> {
+    const fileToolPatterns = [
+      /^generate_file_0[1-8]$/,
+      /^generate_design_file$/,
+      /^generate_artifact_file$/,
+      /^generate_artifact$/
+    ];
+    
+    for (const holder of this.clients) {
+      if (holder.toolNames.size === 0) {
+        try {
+          const { tools } = await holder.client.listTools();
+          holder.toolNames = new Set(tools.map((t) => t.name));
+        } catch {
+          continue;
+        }
+      }
+      for (const toolName of holder.toolNames) {
+        if (fileToolPatterns.some(pattern => pattern.test(toolName))) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   async connect(allowedDir: string): Promise<void> {

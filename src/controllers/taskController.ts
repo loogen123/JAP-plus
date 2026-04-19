@@ -302,6 +302,42 @@ export class TaskController {
     }
   }
 
+  async generateDetailingBatch(req: Request, res: Response) {
+    const runId = String(req.params.runId ?? "").trim();
+    const workspacePath = resolveWorkspacePath(req.body?.workspace ?? req.query.workspace ?? req.query.workspacePath);
+    if (!runId) {
+      res.status(400).json({ message: "runId is required" });
+      return;
+    }
+    try {
+      if (process.env.ENABLE_DETAILING_BATCH === "false") {
+        res.status(400).json({ message: "Detailing batch is disabled" });
+        return;
+      }
+      await withRunLock(runId, async () => {
+        const meta = await readMeta(workspacePath, runId);
+        const runtime = getFileRuntimeRecord(meta);
+        if (!runtime.actions.canGenerateNext || !meta.currentFile) {
+          res.status(409).json({ message: "no file is ready for generation", ...toFileStatusResponse(meta, workspacePath) });
+          return;
+        }
+        if (meta.currentFile !== "05") {
+          res.status(409).json({ message: "Batch detailing must start at file 05", ...toFileStatusResponse(meta, workspacePath) });
+          return;
+        }
+        
+        // 调用新的并发生成逻辑
+        const { filewiseGenerateDetailingBatch } = await import("../services/taskService.js");
+        await filewiseGenerateDetailingBatch(meta);
+      });
+      const refreshed = await readMeta(workspacePath, runId);
+      res.json(toFileStatusResponse(refreshed, workspacePath));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message });
+    }
+  }
+
   async generateSdd(req: Request, res: Response) {
     const runId = String(req.params.runId ?? "").trim();
     const workspacePath = resolveWorkspacePath(req.body?.workspace ?? req.query.workspace ?? req.query.workspacePath);

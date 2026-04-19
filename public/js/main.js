@@ -759,7 +759,15 @@
         }
         try {
           if(actions.canGenerateNext) {
-            await filewiseGenerateNext();
+            if (currentRunState.currentFile === "05") {
+              const res = await fetch(`${API_BASE}/api/v1/tasks/filewise/${currentRunId}/generate-detailing-batch?workspacePath=${encodeURIComponent(getActiveWorkspacePath())}`, { method: "POST" });
+              if (!res.ok) {
+                // 如果批量生成被禁用，回退到普通生成
+                await filewiseGenerateNext();
+              }
+            } else {
+              await filewiseGenerateNext();
+            }
           } else if(actions.canApprove) {
             await filewiseApprove();
           } else {

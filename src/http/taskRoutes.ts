@@ -27,6 +27,7 @@ export function registerTaskRoutes(app: Express, wss: WebSocketServer): void {
   app.get("/api/v1/tasks/filewise/:runId/files/:fileId/content", (req, res) => { controller.getFilewiseFileContent(req, res); });
   app.post("/api/v1/tasks/filewise/:runId/generate-next", (req, res) => { controller.generateNext(req, res); });
   app.post("/api/v1/tasks/filewise/:runId/generate-base-next", (req, res) => { controller.generateBaseNext(req, res); });
+  app.post("/api/v1/tasks/filewise/:runId/generate-detailing-batch", (req, res) => { controller.generateDetailingBatch(req, res); });
   app.post("/api/v1/tasks/filewise/:runId/generate-sdd", (req, res) => { controller.generateSdd(req, res); });
   app.get("/api/v1/tasks/filewise/:runId/sdd-sources", (req, res) => { controller.listSddSources(req, res); });
   app.post("/api/v1/tasks/filewise/:runId/files/:fileId/approve", (req, res) => { controller.approveFile(req, res); });

@@ -15,6 +15,7 @@ export const SddGateValidationSchema = z.object({
   meta: z
     .object({
       usedFallback: z.boolean().optional(),
+      skippedGate: z.boolean().optional(),
     })
     .optional(),
 });
