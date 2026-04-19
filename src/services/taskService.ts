@@ -240,14 +240,25 @@ export async function readPreview(filePath: string | null, maxChars: number): Pr
     };
   }
   const stat = await fs.stat(filePath);
-  const content = await fs.readFile(filePath, "utf-8");
-  const truncated = content.length > maxChars;
+  const truncated = stat.size > maxChars;
+  let content = "";
+  if (stat.size > 0) {
+    const bytesToRead = Math.min(stat.size, maxChars * 4); // maxChars is characters, roughly 4 bytes per UTF-8 char max
+    const fd = await fs.open(filePath, "r");
+    const buffer = Buffer.alloc(bytesToRead);
+    const { bytesRead } = await fd.read(buffer, 0, bytesToRead, 0);
+    await fd.close();
+    content = buffer.toString("utf-8", 0, bytesRead);
+    if (content.length > maxChars) {
+      content = content.slice(0, maxChars);
+    }
+  }
   return {
     exists: true,
     path: filePath,
     size: stat.size,
     truncated,
-    content: truncated ? content.slice(0, maxChars) : content,
+    content,
   };
 }
 
@@ -507,8 +518,13 @@ async function isBaseFilesReadyOnDisk(meta: FileRunMeta): Promise<boolean> {
     return false;
   }
   for (const fileId of ["01", "02", "03", "04", "05", "06", "07"] as const) {
-    const body = await readFileBody(meta.workspacePath, meta.runId, fileId);
-    if (!body.trim()) {
+    const filePath = toRunFilePath(meta.workspacePath, meta.runId, fileId);
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.size === 0) {
+        return false;
+      }
+    } catch {
       return false;
     }
   }
@@ -522,8 +538,8 @@ export async function listSddSourceRuns(
   const tasksDir = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks"));
   const runIds = await listDirectoryNames(tasksDir);
   const rows: SddSourceRunSummary[] = [];
-  for (const runId of runIds) {
-    if (!runId || runId === currentRunId) continue;
+  const promises = runIds.map(async (runId) => {
+    if (!runId || runId === currentRunId) return;
     try {
       const meta = await readMeta(workspacePath, runId);
       const baseReady = await isBaseFilesReadyOnDisk(meta);
@@ -537,9 +553,10 @@ export async function listSddSourceRuns(
         baseReady,
       });
     } catch {
-      continue;
+      // ignore
     }
-  }
+  });
+  await Promise.all(promises);
   return rows
     .filter((item) => item.baseReady)
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
@@ -592,20 +609,31 @@ export type RunEventRecord = {
   [key: string]: unknown;
 };
 
-export async function readRunEventsTail(workspacePath: string, runId: string, tail: number): Promise<RunEventRecord[]> {
+export async function readRunEventsTail(workspacePath: string, runId: string, tail: number, cursor: number = 0): Promise<{ events: RunEventRecord[], nextCursor: number }> {
   const paths = getRunPaths(workspacePath, runId);
   let raw = "";
+  let nextCursor = 0;
   try {
-    raw = await fs.readFile(paths.eventsPath, "utf-8");
+    const stats = await fs.stat(paths.eventsPath);
+    nextCursor = stats.size;
+    if (cursor > 0 && cursor <= stats.size) {
+      const fd = await fs.open(paths.eventsPath, "r");
+      const buffer = Buffer.alloc(stats.size - cursor);
+      await fd.read(buffer, 0, buffer.length, cursor);
+      await fd.close();
+      raw = buffer.toString("utf-8");
+    } else {
+      raw = await fs.readFile(paths.eventsPath, "utf-8");
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
+      return { events: [], nextCursor: 0 };
     }
     throw error;
   }
   const normalizedTail = Number.isFinite(tail) ? Math.max(1, Math.min(1000, Math.floor(tail))) : 200;
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const slice = lines.slice(-normalizedTail);
+  const slice = cursor > 0 ? lines : lines.slice(-normalizedTail);
   const out: RunEventRecord[] = [];
   for (const line of slice) {
     try {
@@ -623,11 +651,11 @@ export async function readRunEventsTail(workspacePath: string, runId: string, ta
       continue;
     }
   }
-  return out;
+  return { events: out, nextCursor };
 }
 
 export async function getRunLastEventAt(workspacePath: string, runId: string): Promise<string | null> {
-  const events = await readRunEventsTail(workspacePath, runId, 1);
+  const { events } = await readRunEventsTail(workspacePath, runId, 1);
   return events[0]?.at ?? null;
 }
 
@@ -752,17 +780,49 @@ export function summarizeText(input: string): string {
   return `${cleaned.slice(0, 140)} ... ${cleaned.slice(-80)}`;
 }
 
+const approvedSummaryCache = new Map<string, { mtime: number, summary: string }>();
+
 export async function loadApprovedArtifactSummary(meta: FileRunMeta): Promise<string> {
   const records: string[] = [];
-  for (const file of meta.files) {
+  const promises = meta.files.map(async (file) => {
     if (file.status !== "APPROVED") {
-      continue;
+      return null;
     }
-    const content = await readFileBody(meta.workspacePath, meta.runId, file.fileId);
-    if (!content.trim()) {
-      continue;
+    const filePath = toRunFilePath(meta.workspacePath, meta.runId, file.fileId);
+    try {
+      const stat = await fs.stat(filePath);
+      const cacheKey = `${filePath}:${stat.mtimeMs}`;
+      if (approvedSummaryCache.has(filePath)) {
+        const cached = approvedSummaryCache.get(filePath)!;
+        if (cached.mtime === stat.mtimeMs) {
+          return `${file.fileId} ${file.artifactName}: ${cached.summary}`;
+        }
+      }
+      
+      const content = await fs.readFile(filePath, "utf-8");
+      if (!content.trim()) {
+        return null;
+      }
+      const summary = summarizeText(content);
+      approvedSummaryCache.set(filePath, { mtime: stat.mtimeMs, summary });
+      
+      // Auto cleanup cache if it grows too large (e.g. > 1000 entries)
+      if (approvedSummaryCache.size > 1000) {
+        const keysToEvict = Array.from(approvedSummaryCache.keys()).slice(0, 200);
+        for (const key of keysToEvict) {
+          approvedSummaryCache.delete(key);
+        }
+      }
+      
+      return `${file.fileId} ${file.artifactName}: ${summary}`;
+    } catch {
+      return null;
     }
-    records.push(`${file.fileId} ${file.artifactName}: ${summarizeText(content)}`);
+  });
+
+  const results = await Promise.all(promises);
+  for (const res of results) {
+    if (res) records.push(res);
   }
   return records.join("\n");
 }
@@ -1133,10 +1193,10 @@ function parseStateTransitions(content: string): Set<string> {
   return out;
 }
 
-async function runLocalSddPrecheck(meta: FileRunMeta, constraints: SddConstraints): Promise<SddPrecheckResult> {
-  const openapi = await readFileBody(meta.workspacePath, meta.runId, "04");
-  const domain = await readFileBody(meta.workspacePath, meta.runId, "02");
-  const stateMachine = await readFileBody(meta.workspacePath, meta.runId, "03");
+async function runLocalSddPrecheck(snapshot: SddInputSnapshot, constraints: SddConstraints): Promise<SddPrecheckResult> {
+  const openapi = snapshot.files["04"];
+  const domain = snapshot.files["02"];
+  const stateMachine = snapshot.files["03"];
   const openapiKeys = parseOpenApiSignatures(openapi);
   const tableMap = parseTableColumns(domain);
   const transitionKeys = parseStateTransitions(stateMachine);
@@ -1215,12 +1275,13 @@ async function runLocalSddPrecheck(meta: FileRunMeta, constraints: SddConstraint
 
 async function validateSddGate(
   meta: FileRunMeta,
+  snapshot: SddInputSnapshot,
   constraints: SddConstraints,
   precheck: SddPrecheckResult,
 ): Promise<{ validation: SddGateValidation; payload: Record<string, unknown> }> {
-  const openapi = await readFileBody(meta.workspacePath, meta.runId, "04");
-  const domain = await readFileBody(meta.workspacePath, meta.runId, "02");
-  const stateMachine = await readFileBody(meta.workspacePath, meta.runId, "03");
+  const openapi = snapshot.files["04"];
+  const domain = snapshot.files["02"];
+  const stateMachine = snapshot.files["03"];
   const model = createModel(meta, 45000);
   const structured = model.withStructuredOutput(SddGateValidationSchema, { method: "functionCalling" });
 
@@ -1308,7 +1369,45 @@ async function loadSddEvidence(meta: FileRunMeta): Promise<string> {
   return blocks.join("\n");
 }
 
+// SDD Input Snapshot
+export interface SddInputSnapshot {
+  requirement: string;
+  approvedSummary: string;
+  evidence: string; // 01~07 content combined
+  qa: string;
+  skill: string;
+  files: {
+    "02": string;
+    "03": string;
+    "04": string;
+  };
+}
 
+async function buildSddInputSnapshot(meta: FileRunMeta, approvedSummary: string, fallbackContextOnly: boolean): Promise<SddInputSnapshot> {
+  const [skill, qa, evidence, file02, file03, file04] = await Promise.all([
+    loadSkillContext(meta.workspacePath),
+    Promise.resolve(buildQASnapshot(meta)),
+    loadSddEvidence(meta),
+    readFileBody(meta.workspacePath, meta.runId, "02").catch(() => ""),
+    readFileBody(meta.workspacePath, meta.runId, "03").catch(() => ""),
+    readFileBody(meta.workspacePath, meta.runId, "04").catch(() => ""),
+  ]);
+
+  const requirement = fallbackContextOnly ? clampText(meta.requirement, 6000) : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
+
+  return {
+    requirement,
+    approvedSummary,
+    evidence,
+    qa,
+    skill,
+    files: {
+      "02": file02,
+      "03": file03,
+      "04": file04,
+    }
+  };
+}
 
 export async function generateArtifactByLlm(
   meta: FileRunMeta,
@@ -1422,19 +1521,15 @@ export async function tryGenerateWithMcp(
 
 async function generateSddConstraintsDraft(
   meta: FileRunMeta,
-  approvedSummary: string,
+  snapshot: SddInputSnapshot,
   fallbackContextOnly: boolean,
 ): Promise<SddConstraints> {
   const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
   const structured = model.withStructuredOutput(SddConstraintsSchema, { method: "functionCalling" });
-  const skill = await loadSkillContext(meta.workspacePath);
-  const qa = buildQASnapshot(meta);
-  const evidence = await loadSddEvidence(meta);
-  const requirement = fallbackContextOnly ? clampText(meta.requirement, 6000) : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
-
+  
   // --- 新增：硬性提取 02 和 04 的约束列表，喂给大模型防止幻觉遗漏 ---
-  const domainModelText = await readFileBody(meta.workspacePath, meta.runId, "02").catch(() => "");
-  const openApiText = await readFileBody(meta.workspacePath, meta.runId, "04").catch(() => "");
+  const domainModelText = snapshot.files["02"];
+  const openApiText = snapshot.files["04"];
   
   // 提取表名
   const tableMap = parseTableColumns(domainModelText);
@@ -1445,11 +1540,11 @@ async function generateSddConstraintsDraft(
   const hardcodedApis = Array.from(apiSet);
 
   const payload = {
-    requirement,
-    approvedSummary: clampText(approvedSummary, 12000),
-    evidence: clampText(evidence, 36000),
-    qa: clampText(qa, 3000),
-    skill: clampText(skill, 1800),
+    requirement: snapshot.requirement,
+    approvedSummary: clampText(snapshot.approvedSummary, 12000),
+    evidence: clampText(snapshot.evidence, 36000),
+    qa: clampText(snapshot.qa, 3000),
+    skill: clampText(snapshot.skill, 1800),
     HARD_CONSTRAINTS: {
       MUST_INCLUDE_TABLES: hardcodedTables,
       MUST_INCLUDE_APIS: hardcodedApis
@@ -1493,22 +1588,18 @@ function appendConstraintsBlock(markdown: string, constraints: SddConstraints): 
 
 async function generateSddBodyWithConstraints(
   meta: FileRunMeta,
-  approvedSummary: string,
+  snapshot: SddInputSnapshot,
   constraints: SddConstraints,
   fallbackContextOnly: boolean,
   minimalist: boolean,
 ): Promise<string> {
-  const skill = await loadSkillContext(meta.workspacePath);
-  const qa = buildQASnapshot(meta);
-  const evidence = await loadSddEvidence(meta);
-  const requirement = fallbackContextOnly ? clampText(meta.requirement, 6000) : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
   const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
   const extraPrompt = minimalist
     ? "\nMINIMALIST MODE: keep concise sections only."
     : "";
   const prompt =
     [
-      buildSddPrompt(requirement, approvedSummary, evidence, qa, skill),
+      buildSddPrompt(snapshot.requirement, snapshot.approvedSummary, snapshot.evidence, snapshot.qa, snapshot.skill),
       "",
       "Constraint JSON (SSOT):",
       JSON.stringify(constraints),
@@ -1553,6 +1644,18 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
     await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
       logType: "INFO",
       title: "系统",
+      summary: "正在加载上下文快照...",
+    });
+    emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+      logType: "INFO",
+      title: "系统",
+      summary: "正在加载上下文快照...",
+    });
+    const snapshot = await buildSddInputSnapshot(meta, approvedSummary, isFallback);
+
+    await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
+      logType: "INFO",
+      title: "系统",
       summary: "正在分析前置产物，提取 SDD 硬性约束...",
     });
     emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
@@ -1561,8 +1664,8 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
       summary: "正在分析前置产物，提取 SDD 硬性约束...",
     });
 
-    const constraints = await generateSddConstraintsDraft(meta, approvedSummary, isFallback);
-    const precheck = await runLocalSddPrecheck(meta, constraints);
+    const constraints = await generateSddConstraintsDraft(meta, snapshot, isFallback);
+    const precheck = await runLocalSddPrecheck(snapshot, constraints);
     
     await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
       logType: "INFO",
@@ -1575,7 +1678,7 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
       summary: "正在执行架构一致性预检与门禁校验...",
     });
     
-    const { validation, payload } = await validateSddGate(meta, constraints, precheck);
+    const { validation, payload } = await validateSddGate(meta, snapshot, constraints, precheck);
     
     // 如果 Gate 校验未通过，将错误降级为 Warning，不抛出异常阻断生成
     if (!validation.passed) {
@@ -1604,7 +1707,7 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
       summary: "门禁校验完成，正在基于约束生成 SDD 正文...",
     });
 
-    const markdown = await generateSddBodyWithConstraints(meta, approvedSummary, constraints, isFallback, isMinimalist);
+    const markdown = await generateSddBodyWithConstraints(meta, snapshot, constraints, isFallback, isMinimalist);
     return {
       content: appendConstraintsBlock(markdown, constraints),
       usedMcp: false,
@@ -1668,6 +1771,27 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
       toolName: null,
       fallbackReason: "MCP tool unavailable; switched to section merge",
     };
+  }
+}
+
+const runMutexMap = new Map<string, Promise<void>>();
+
+export async function withRunLock<T>(runId: string, fn: () => Promise<T>): Promise<T> {
+  const existingLock = runMutexMap.get(runId) || Promise.resolve();
+  let release: () => void;
+  const newLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  runMutexMap.set(runId, existingLock.then(() => newLock));
+
+  try {
+    await existingLock;
+    return await fn();
+  } finally {
+    release!();
+    if (runMutexMap.get(runId) === newLock) {
+      runMutexMap.delete(runId);
+    }
   }
 }
 
