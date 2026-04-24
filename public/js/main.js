@@ -46,8 +46,8 @@
     let currentRunState = null;
     let selectedFileId = null;
     let isAutoRunning = false;
-    let sddSourceRuns = [];
-    let selectedSddSourceRunId = null;
+    let tasksSourceRuns = [];
+    let selectedTasksSourceRunId = null;
     let recentEventLastAt = "";
     let recentEventCursor = 0;
     let sddHeartbeatTimer = null;
@@ -102,7 +102,8 @@
       return Boolean((cached?.apiKey||"").trim());
     }
     function canStartDesign(){
-      const baseRequirement = (finalizedRequirement||"").trim() || (document.getElementById("businessGoalInput").value||"").trim();
+      const inputEl = document.getElementById("chatInput");
+      const baseRequirement = (finalizedRequirement||"").trim() || (inputEl ? inputEl.value : "").trim() || chatMessages.length > 0;
       return Boolean(baseRequirement) && !finalizeInProgress && !finalizeModalOpen && !designSubmitting && hasAvailableLlmConfig();
     }
     function refreshDesignButtonState(){
@@ -153,6 +154,8 @@
     function updateWsChip(status){ const el=document.getElementById("wsChip"); el.className="chip "+(status==="connected"?"green":status==="disconnected"?"red":""); el.textContent="WebSocket: "+status; }
 
     let wsPingTimer = null;
+    let wsReconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 10;
 
     function connectWebSocket(taskId){
       if(taskId!==undefined&&taskId!==null) currentTaskId=taskId;
@@ -166,6 +169,7 @@
       
       ws.onopen = () => {
         updateWsChip("connected");
+        wsReconnectAttempts = 0;
         wsPingTimer = setInterval(() => {
           if(ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "ping" }));
@@ -184,14 +188,34 @@
       };
       ws.onerror = () => updateWsChip("disconnected");
       ws.onclose = () => { 
-        addLog("系统", "WebSocket 已断开，正在重连...", "error");
         updateWsChip("disconnected"); 
         if(wsPingTimer) { clearInterval(wsPingTimer); wsPingTimer=null; }
         ws=null; 
-        wsReconnectTimer=setTimeout(()=>connectWebSocket(currentTaskId),3000); 
+        
+        if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          wsReconnectAttempts++;
+          const delay = Math.min(1000 * Math.pow(1.5, wsReconnectAttempts), 10000);
+          addLog("系统", `WebSocket 已断开，${Math.round(delay/1000)}秒后尝试重连 (${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`, "error");
+          wsReconnectTimer = setTimeout(() => connectWebSocket(currentTaskId), delay);
+        } else {
+          addLog("系统", "WebSocket 重连失败次数过多，请手动刷新页面", "error");
+        }
       };
     }
-    function connectWebSocketForTask(taskId){ currentTaskId=taskId||null; connectWebSocket(currentTaskId); }
+    function connectWebSocketForTask(taskId){
+      if(ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+      }
+      if(wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
+      wsReconnectAttempts = 0;
+      currentTaskId=taskId||null;
+      connectWebSocket(currentTaskId);
+    }
 
     function esc(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll("\"","&quot;").replaceAll("'","&#39;"); }
     function addLog(tag,msg,level="info"){ 
@@ -211,7 +235,7 @@
       const code = data?.errorCode || "SDD_GENERATION_FAILED";
       const stage = data?.stage || "DETAILING";
       const lastEventAt = data?.lastEventAt ? ` lastEventAt=${data.lastEventAt}` : "";
-      const msg = data?.message || "SDD生成失败";
+      const msg = data?.message || "任务清单生成失败";
       return `[${code}] stage=${stage}${lastEventAt} | ${msg}`;
     }
     function rememberEventLogKey(key){
@@ -234,21 +258,21 @@
         return;
       }
       if(type === "SDD_FAILURE_SUMMARY"){
-        addLog("SDD失败",`Top3冲突: ${e?.top3 || "无"} | 建议: ${e?.suggestion || "请先修正01-07后重试"}`,"error");
+        addLog("任务清单失败",`Top3冲突: ${e?.top3 || "无"} | 建议: ${e?.suggestion || "请先修正01-07后重试"}`,"error");
         return;
       }
       if(type === "SDD_GATE_VALIDATED"){
         const passed = e?.passed === true;
         const conflicts = Number(e?.conflicts || 0);
-        addLog("SDD Gate", passed ? "校验通过" : `校验未通过，冲突数=${conflicts}`, passed ? "success" : "error");
+        addLog("架构门禁", passed ? "校验通过" : `校验未通过，冲突数=${conflicts}`, passed ? "success" : "error");
         return;
       }
       if(type === "SDD_CONSTRAINTS_EXTRACTED"){
-        addLog("SDD阶段",`约束已提取 apis=${e?.apis || 0} tables=${e?.tables || 0} states=${e?.stateMachines || 0}`,"info");
+        addLog("任务生成阶段",`约束已提取 apis=${e?.apis || 0} tables=${e?.tables || 0} states=${e?.stateMachines || 0}`,"info");
         return;
       }
-      if(type === "SDD_SOURCE_IMPORTED"){
-        addLog("SDD阶段","历史1-7导入完成，开始生成08","info");
+      if(type === "TASKS_SOURCE_IMPORTED"){
+        addLog("任务生成阶段","历史1-7导入完成，开始生成08","info");
       }
     }
     async function pullRecentEvents(tail=200){
@@ -303,42 +327,43 @@
       const actions = currentRunState?.actions || {};
       const currentFile = currentRunState?.currentFile || null;
       const busy = isGeneratingBase || isGeneratingSdd;
-      const canGenerateBase = Boolean(actions.canGenerateNext && currentFile && currentFile !== "08");
-      const canGenerateSdd = Boolean(actions.canGenerateNext && currentFile === "08");
-      const hasSelectedSddSource = Boolean(selectedSddSourceRunId);
+      const canGenerateNext = Boolean(actions.canGenerateNext && currentFile);
       const canStartAuto = Boolean(
         currentRunId &&
         currentRunState &&
         currentRunState.stage !== "DONE" &&
-        currentFile &&
-        currentFile !== "08",
+        currentFile
       );
 
-      const baseBtn = document.getElementById("btnGenerateBase");
-      const sddBtn = document.getElementById("btnGenerateSdd");
-      const sddCurrentBtn = document.getElementById("btnGenerateSddCurrent");
+      const nextBtn = document.getElementById("btnGenerateNext");
       const autoBtn = document.getElementById("btnAutoRun");
 
-      if (baseBtn) {
-        baseBtn.disabled = busy || !canGenerateBase;
+      if (nextBtn) {
+        nextBtn.disabled = busy || !canGenerateNext;
+        
+        // Dynamically update button text based on the next file
+        if (busy) {
+          nextBtn.innerText = "生成中...";
+        } else if (currentFile === "01") {
+          nextBtn.innerText = "生成需求草案 (01)";
+        } else if (currentFile === "07") {
+          nextBtn.innerText = "生成可执行任务清单 (08)";
+        } else if (currentFile && currentFile !== "01" && currentFile !== "07") {
+          nextBtn.innerText = "并发生成架构设计模块 (02-07)";
+        } else {
+          nextBtn.innerText = "生成下一步工件";
+        }
       }
-      if (sddBtn) {
-        sddBtn.disabled = busy;
-        sddBtn.innerText = isGeneratingSdd ? "生成中..." : "生成SDD文件(历史流程)";
-      }
-      if (sddCurrentBtn) {
-        sddCurrentBtn.disabled = busy || !canGenerateSdd;
-        sddCurrentBtn.innerText = isGeneratingSdd ? "生成中..." : "根据当前任务继续生成SDD";
-      }
+      
       if (autoBtn) {
         if (isAutoRunning) {
-          autoBtn.textContent = "停止自动生成";
+          autoBtn.textContent = "停止自动流转";
           autoBtn.style.background = "#fff7f7";
           autoBtn.style.color = "#d85555";
           autoBtn.style.borderColor = "#f1c3c3";
           autoBtn.disabled = busy;
         } else {
-          autoBtn.textContent = "一键自动生成前7文件 (免审核)";
+          autoBtn.textContent = "一键自动流转 (免人工审核)";
           autoBtn.style.background = "#f2f7ff";
           autoBtn.style.color = "#2f5d9e";
           autoBtn.style.borderColor = "#a8c5ff";
@@ -374,15 +399,41 @@
         return;
       }
         const showIntermediate = getShowIntermediateArtifacts();
-        const hasSdd = files.some((f)=>f.fileId==="08");
-        const visibleFiles = (!showIntermediate && hasSdd) ? files.filter((f)=>f.fileId==="08") : files;
+        const hasSdd = files.some((f)=>f.fileId==="07");
+        const visibleFiles = (!showIntermediate && hasSdd) ? files.filter((f)=>f.fileId==="07") : files;
         count.textContent=`${visibleFiles.length} 个`;
         if(!selectedFileId || !visibleFiles.some((f)=>f.fileId===selectedFileId)) selectedFileId = visibleFiles[0].fileId;
+        
+        // --- NEW: A la Carte Rendering Logic ---
+        const selectedModules = currentRunState?.selectedModules;
+        
         tree.innerHTML=visibleFiles.map((f)=>{
-        const active=f.fileId===selectedFileId?"background:#eef4ff;":"";
-        const stage=f.fileId===currentRunState?.currentFile?" ⭐":"";
-        return `<div onclick="selectPipelineFile('${esc(f.fileId)}')" style="padding:6px 4px;border-bottom:1px dashed #e8eef9;cursor:pointer;${active}">${esc(f.fileId)} · ${esc(f.status)}${stage}</div>`;
-      }).join("");
+          const isSelectedModule = !selectedModules || selectedModules.includes(f.fileId) || f.fileId === "01" || f.fileId === "07";
+          
+          let displayStatus = esc(f.status);
+          let styleModifiers = "";
+          
+          if (!isSelectedModule) {
+            displayStatus = "未选配 (SKIPPED)";
+            styleModifiers = "opacity: 0.4; text-decoration: line-through;";
+          } else if (!selectedModules && f.fileId !== "01" && f.fileId !== "07") {
+            displayStatus = "待选配 (OPTIONAL)";
+            styleModifiers = "opacity: 0.6;";
+          } else if (f.status === "GENERATING") {
+            displayStatus = "生成中 (GENERATING) <span class='generating-dots'>...</span>";
+            styleModifiers = "color: #2f5d9e; font-weight: 500;";
+          }
+          
+          const active = f.fileId===selectedFileId ? "background:#eef4ff;" : "";
+          const stage = f.fileId===currentRunState?.currentFile ? " ⭐" : "";
+          
+          // Use artifactName if available, fallback to fileId
+          const displayName = f.artifactName || f.fileId;
+          
+          return `<div onclick="selectPipelineFile('${esc(f.fileId)}')" style="padding:6px 4px;border-bottom:1px dashed #e8eef9;cursor:pointer;${active}${styleModifiers}">${esc(displayName)} · ${displayStatus}${stage}</div>`;
+        }).join("");
+        // ----------------------------------------
+        
         const selected = visibleFiles.find((f)=>f.fileId===selectedFileId) || visibleFiles[0];
       document.getElementById("previewName").textContent = `${selected.fileId} ${selected.artifactName}`;
       updateFileActionButtons();
@@ -596,8 +647,20 @@
     }
 
     async function generateQuestionnaire(){
-      const requirement=(document.getElementById("businessGoalInput").value||"").trim();
-      if(!requirement){ addLog("错误","请先输入业务目标","error"); return; }
+      const inputEl = document.getElementById("businessGoalInput");
+      const chatInputEl = document.getElementById("chatInput");
+      
+      let requirement = (inputEl ? inputEl.value : "").trim();
+      
+      // Get requirement from chat history if input is empty
+      if (!requirement) {
+        requirement = (chatInputEl ? chatInputEl.value : "").trim() || chatMessages
+          .filter(m => m.role === "user")
+          .map(m => m.content)
+          .join("\n\n---\n\n");
+      }
+      
+      if(!requirement){ addLog("错误","请先在左侧输入框或沙盒对话中输入一句话业务点子","error"); return; }
       const llm=buildTaskLlmConfig();
       if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
       const elicitationMode = getElicitationMode();
@@ -613,9 +676,9 @@
       if(progressiveAppendTimer){ clearInterval(progressiveAppendTimer); progressiveAppendTimer = null; }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
       const workspace=workspacePath ? { path:workspacePath } : (getWorkspacePathConfig()||{});
-      const targetTotal = 100;
-      const firstBatchSize = elicitationMode==="deep" ? 12 : 6;
-      const backgroundBatchSize = elicitationMode==="deep" ? 12 : 8;
+      const targetTotal = 100; // 恢复为100，让大模型自行根据需求清晰度提前终止，而不是在前端被硬性截断
+      const firstBatchSize = elicitationMode==="deep" ? 8 : 6;
+      const backgroundBatchSize = elicitationMode==="deep" ? 8 : 6;
       const requestTimeoutMs = elicitationMode==="deep" ? 120000 : 90000;
       openQuestionnaireModal();
       addLog("系统",`AI 正在发起澄清（${elicitationMode==="deep"?"深度":"快速"}模式）...`);
@@ -730,15 +793,40 @@
       document.getElementById("btnSaveEdit").disabled = false;
     });
 
-    function toggleAutoRun() {
+    async function toggleAutoRun() {
       if(isAutoRunning) {
         isAutoRunning = false;
         addLog("系统", "已停止自动生成");
         renderWorkflowButtons();
       } else {
         if(!currentRunId) { addLog("系统", "当前没有正在运行的任务"); return; }
+        
+        // Ensure modules are selected before auto-running
+        if(!currentRunState?.selectedModules) {
+          const selectedModules = await promptForModules();
+          try {
+            const workspacePath=(document.getElementById("workspacePath").value||"").trim();
+            const patchResp = await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/modules`,{
+              method:"PATCH",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({
+                selectedModules,
+                workspace: workspacePath ? {path:workspacePath} : undefined
+              })
+            });
+            if (!patchResp.ok) {
+              addLog("错误", "配置架构模块失败", "error");
+              return;
+            }
+            currentRunState.selectedModules = selectedModules;
+          } catch (e) {
+            addLog("错误", "配置架构模块网络异常", "error");
+            return;
+          }
+        }
+        
         isAutoRunning = true;
-        addLog("系统", "已开启一键自动生成，将自动跑完前7个文件...");
+        addLog("系统", "已开启一键自动并发生成，将自动跑完前置基础设计文件...");
         renderWorkflowButtons();
         autoRunLoop();
       }
@@ -747,8 +835,8 @@
     async function autoRunLoop() {
       while(isAutoRunning && currentRunId && currentRunState) {
         const actions = currentRunState.actions || {};
-        if(currentRunState.currentFile === "08") {
-          addLog("系统", "前7个文件已完成，自动生成停止在SDD前", "success");
+        if(currentRunState.currentFile === "07") {
+          addLog("系统", "基础设计文件已完成，自动生成停止在开发任务清单前", "success");
           toggleAutoRun();
           break;
         }
@@ -759,16 +847,10 @@
         }
         try {
           if(actions.canGenerateNext) {
-            if (currentRunState.currentFile === "05") {
-              const res = await fetch(`${API_BASE}/api/v1/tasks/filewise/${currentRunId}/generate-detailing-batch?workspacePath=${encodeURIComponent(getActiveWorkspacePath())}`, { method: "POST" });
-              if (!res.ok) {
-                // 如果批量生成被禁用，回退到普通生成
-                await filewiseGenerateNext();
-              }
-            } else {
-              await filewiseGenerateNext();
-            }
+            await filewiseGenerateNext();
           } else if(actions.canApprove) {
+            // Close any mistakenly opened review modal before approving automatically
+            closeFileReviewModal();
             await filewiseApprove();
           } else {
             await new Promise(r => setTimeout(r, 2000));
@@ -792,8 +874,8 @@
       if(modalPath) return modalPath;
       return getActiveWorkspacePath();
     }
-    function getSddSourceWorkspacePath(){
-      const modalPath = (document.getElementById("sddSourceWorkspacePath").value||"").trim();
+    function getTasksSourceWorkspacePath(){
+      const modalPath = (document.getElementById("tasksSourceWorkspacePath").value||"").trim();
       if(modalPath) return modalPath;
       return getActiveWorkspacePath();
     }
@@ -819,54 +901,57 @@
     function closeHistoryModal(){
       document.getElementById("historyModal").classList.remove("show");
     }
-    async function chooseSddSourceWorkspaceFolder(){
+    async function chooseTasksSourceWorkspaceFolder(){
       try{
         const resp=await fetch(API_BASE+"/api/v1/config/workspace/choose",{method:"POST"});
         const data=await resp.json();
         if(!resp.ok||!data?.path){ addLog("错误",data?.message||"未选择目录","error"); return; }
-        document.getElementById("sddSourceWorkspacePath").value = data.path;
-        await loadSddSourceRuns();
+        document.getElementById("tasksSourceWorkspacePath").value = data.path;
+        await loadTasksSourceRuns();
       }catch(error){
         addLog("错误",String(error?.message||error),"error");
       }
     }
-    function openSddSourceModal(){
+    function openTasksSourceModal(){
+      if(currentRunId && currentRunState?.currentFile !== "07"){
+        addLog("系统","当前不在7号文件阶段，不能生成任务清单");
+        return;
+      }
       const currentPath = getActiveWorkspacePath();
       if(currentPath){
-        document.getElementById("sddSourceWorkspacePath").value = currentPath;
+        document.getElementById("tasksSourceWorkspacePath").value = currentPath;
       }
-      document.getElementById("sddSourceModal").classList.add("show");
-      void loadSddSourceRuns();
+      selectedTasksSourceRunId = null;
+      document.getElementById("tasksSourceModal").classList.add("show");
+      void loadTasksSourceRuns();
     }
-    function closeSddSourceModal(){
-      document.getElementById("sddSourceModal").classList.remove("show");
+    function closeTasksSourceModal(){
+      document.getElementById("tasksSourceModal").classList.remove("show");
     }
-    function renderSddSourceRuns(){
-      const listEl = document.getElementById("sddSourceList");
-      const infoEl = document.getElementById("sddSourceInfo");
-      const confirmBtn = document.getElementById("sddSourceConfirmBtn");
-      if(!Array.isArray(sddSourceRuns) || sddSourceRuns.length===0){
+    function renderTasksSourceRuns(){
+      const listEl = document.getElementById("tasksSourceList");
+      const infoEl = document.getElementById("tasksSourceInfo");
+      const confirmBtn = document.getElementById("tasksSourceConfirmBtn");
+      if(!Array.isArray(tasksSourceRuns) || tasksSourceRuns.length===0){
         listEl.innerHTML = '<div class="history-empty">未找到可用历史流程（需01-07全部审核通过）</div>';
         infoEl.textContent = "未选择历史流程";
         confirmBtn.disabled = true;
         return;
       }
-      listEl.innerHTML = sddSourceRuns.map((item)=>{
-        const active = selectedSddSourceRunId===item.runId;
-        return `<div class="history-item ${active?"active":""}" onclick="selectSddSourceRun('${esc(item.runId)}')"><div style="font-size:13px;font-weight:600;color:#2f4061;">${esc(item.runId)}</div><div class="history-meta">更新时间：${new Date(item.updatedAt).toLocaleString()} · 阶段：${esc(item.stage||"--")}</div><div class="history-summary">状态：${esc(item.status||"--")} · 当前文件：${esc(item.currentFile||"--")}</div></div>`;
+      listEl.innerHTML = tasksSourceRuns.map((item)=>{
+        const active = selectedTasksSourceRunId===item.runId;
+        return `<div class="history-item ${active?"active":""}" onclick="selectTasksSourceRun('${esc(item.runId)}')"><div style="font-size:13px;font-weight:600;color:#2f4061;">${esc(item.runId)}</div><div class="history-meta">更新时间：${new Date(item.updatedAt).toLocaleString()} · 阶段：${esc(item.stage||"--")}</div><div class="history-summary">状态：${esc(item.status||"--")} · 当前文件：${esc(item.currentFile||"--")}</div></div>`;
       }).join("");
-      const selected = sddSourceRuns.find((item)=>item.runId===selectedSddSourceRunId);
+      const selected = tasksSourceRuns.find((item)=>item.runId===selectedTasksSourceRunId);
       infoEl.textContent = selected ? `已选择：${selected.runId}` : "未选择历史流程";
       confirmBtn.disabled = !selected;
     }
-    function selectSddSourceRun(runId){
-      selectedSddSourceRunId = runId;
-      renderSddSourceRuns();
-      renderWorkflowButtons();
-      addLog("系统",`已选择历史流程：${runId}`);
+    function selectTasksSourceRun(runId){
+      selectedTasksSourceRunId = runId;
+      renderTasksSourceRuns();
     }
-    async function loadSddSourceRuns(){
-      const workspacePath = getSddSourceWorkspacePath();
+    async function loadTasksSourceRuns(){
+      const workspacePath = getTasksSourceWorkspacePath();
       const query = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : "";
       try{
         const apiPath = currentRunId
@@ -875,38 +960,23 @@
         const resp=await fetch(API_BASE+`${apiPath}${query}`,{ cache:"no-store" });
         const data=await resp.json();
         if(!resp.ok){ addLog("错误",data?.message||"加载SDD历史流程失败","error"); return; }
-        sddSourceRuns = Array.isArray(data?.items) ? data.items : [];
-        if(selectedSddSourceRunId && !sddSourceRuns.some((item)=>item.runId===selectedSddSourceRunId)){
-          selectedSddSourceRunId = null;
-        }
-        renderSddSourceRuns();
-        renderWorkflowButtons();
+        tasksSourceRuns = Array.isArray(data?.items) ? data.items : [];
+        renderTasksSourceRuns();
       }catch(error){
         addLog("错误",String(error?.message||error),"error");
       }
     }
-    function generateSddFromCurrentRun(){
-      if(!currentRunId){
-        addLog("系统","当前没有任务，请先生成前7文件或选择历史流程");
-        return;
-      }
-      if(currentRunState?.currentFile !== "08"){
-        addLog("系统","当前任务未到08阶段，不能直接生成SDD");
-        return;
-      }
-      void filewiseGenerateSdd();
-    }
     async function confirmGenerateSddWithSource(){
-      if(!selectedSddSourceRunId){ addLog("系统","请先选择历史流程"); return; }
-      const btn = document.getElementById("sddSourceConfirmBtn");
+      if(!selectedTasksSourceRunId){ addLog("系统","请先选择历史流程"); return; }
+      const btn = document.getElementById("tasksSourceConfirmBtn");
       btn.disabled = true;
-      closeSddSourceModal();
-      addLog("系统",`已开始生成SDD，历史流程=${selectedSddSourceRunId}`);
+      closeTasksSourceModal();
+      addLog("系统",`已开始生成任务清单，历史流程=${selectedTasksSourceRunId}`);
       try{
     if(currentRunId){
-      addLog("系统",`在当前任务 ${currentRunId} 上导入历史1-7并生成SDD...`);
-      await filewiseGenerateSdd(selectedSddSourceRunId);
-      addLog("系统","SDD生成流程已提交完成","success");
+      addLog("系统",`在当前任务 ${currentRunId} 上导入历史1-7并生成任务清单...`);
+      await filewiseGenerateTasks(selectedTasksSourceRunId);
+      addLog("系统","任务清单生成流程已提交完成","success");
     } else {
       const llm=buildTaskLlmConfig();
       if(!llm){
@@ -918,26 +988,26 @@
         return;
       }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-      addLog("系统","正在基于历史流程创建任务并生成SDD...");
+      addLog("系统","正在基于历史流程创建任务并生成任务清单...");
       isGeneratingSdd = true;
       renderWorkflowButtons();
       startSddHeartbeat();
       
       // 提前绑定当前任务并连接 WS，以便能接收到生成过程中的中间日志
-      if(selectedSddSourceRunId !== currentRunId) {
+      if(selectedTasksSourceRunId !== currentRunId) {
         recentEventLastAt = "";
         recentEventCursor = 0;
       }
-      currentRunId = selectedSddSourceRunId;
-      currentTaskId = selectedSddSourceRunId;
-      setTaskIdentity(currentRunId, selectedSddSourceRunId);
+      currentRunId = selectedTasksSourceRunId;
+      currentTaskId = selectedTasksSourceRunId;
+      setTaskIdentity(currentRunId, selectedTasksSourceRunId);
       connectWebSocketForTask(currentRunId);
 
       const resp=await fetch(API_BASE+"/api/v1/tasks/filewise/generate-sdd-from-source",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          sourceRunId: selectedSddSourceRunId,
+          sourceRunId: selectedTasksSourceRunId,
           llm,
           workspace: workspacePath ? {path:workspacePath} : undefined
         })
@@ -952,10 +1022,10 @@
       currentRunState = data;
       recentEventLastAt = data?.lastEventAt || recentEventLastAt;
       await refreshFilewiseRun();
-      addLog("系统",`SDD生成完成，任务ID=${currentRunId}`,"success");
+      addLog("系统",`任务清单生成完成，任务ID=${currentRunId}`,"success");
     }
   } catch (error) {
-        addLog("错误",`SDD生成异常：${String(error?.message||error)}`,"error");
+        addLog("错误",`任务清单生成异常：${String(error?.message||error)}`,"error");
         await pullRecentEvents(200);
         stopSddHeartbeat();
       } finally {
@@ -1418,7 +1488,9 @@
       if(currentRunState?.currentFile===fileId){
         const currentFileRec = currentRunState?.files?.find(f => f.fileId === fileId);
         if(currentFileRec && (currentFileRec.status === "GENERATED" || currentFileRec.status === "REVIEWING" || currentFileRec.status === "REJECTED")) {
-          openFileReviewModal();
+          if(!isAutoRunning) {
+            openFileReviewModal();
+          }
         }
       }
     }
@@ -1452,7 +1524,7 @@
             const action = conflicts.slice(0, 3).map((c) => c.suggestion).filter(Boolean).join("；");
             const gateLogKey = `${data.runId || ""}|${head}|${action}`;
             if (lastSddGateLogKey !== gateLogKey) {
-              addLog("SDD Gate", `未通过：${head || "存在一致性冲突"} | 建议：${action || "先修正01-07后重试"}`, "error");
+              addLog("架构门禁", `未通过：${head || "存在一致性冲突"} | 建议：${action || "先修正01-07后重试"}`, "error");
               lastSddGateLogKey = gateLogKey;
             }
           } else {
@@ -1476,6 +1548,8 @@
             } else {
               // No content provided in summary response. Fetch if we are switching to it, or if we need to review it.
               if (selectedFileId !== data.currentFile || (needsReview && !isAutoRunning && document.getElementById("filePreview").value === "")) {
+                // If it's auto running, we don't necessarily want to select pipeline file immediately if it triggers a review modal.
+                // Actually selectPipelineFile respects !isAutoRunning now.
                 await selectPipelineFile(data.currentFile);
               } else {
                 if (needsReview && !isAutoRunning) {
@@ -1534,7 +1608,7 @@
         renderWorkflowButtons();
       }
     }
-    async function filewiseGenerateSdd(sourceRunId){
+    async function filewiseGenerateTasks(sourceRunId){
       if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
       const llm = buildTaskLlmConfig();
       if(!llm){ 
@@ -1546,7 +1620,7 @@
       renderWorkflowButtons();
       startSddHeartbeat();
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-      addLog("系统","正在生成SDD...");
+      addLog("系统","正在生成开发任务清单(Tasks)...");
       
       try {
         const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-sdd`,{
@@ -1577,7 +1651,7 @@
         currentRunState = data;
         await refreshFilewiseRun();
       } catch (err) {
-        addLog("错误","生成SDD请求异常: " + String(err?.message || err), "error");
+        addLog("错误","生成任务清单请求异常: " + String(err?.message || err), "error");
         stopSddHeartbeat();
       } finally {
         isGeneratingSdd = false;
@@ -1585,16 +1659,69 @@
       }
     }
     async function filewiseGenerateNext(){
-      if(currentRunState?.currentFile === "08"){
-        await filewiseGenerateSdd();
+      if(currentRunState?.currentFile === "07"){
+        await filewiseGenerateTasks();
         return;
       }
       await filewiseGenerateBaseNext();
     }
+    let resolveModuleSelection = null;
+
+    function promptForModules() {
+      return new Promise((resolve) => {
+        document.getElementById("moduleSelectionModal").classList.add("show");
+        resolveModuleSelection = resolve;
+      });
+    }
+
+    window.confirmModuleSelection = async function() {
+      const selected = [];
+      if(document.getElementById("mod02").checked) selected.push("02");
+      if(document.getElementById("mod03").checked) selected.push("03");
+      if(document.getElementById("mod04").checked) selected.push("04");
+      if(document.getElementById("mod05").checked) selected.push("05");
+      if(document.getElementById("mod06").checked) selected.push("06");
+      
+      document.getElementById("moduleSelectionModal").classList.remove("show");
+      
+      if(resolveModuleSelection) {
+        resolveModuleSelection(selected);
+        resolveModuleSelection = null;
+      }
+    };
+
     async function filewiseApprove(){
       if(!currentRunId || !currentRunState?.currentFile){ return; }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
       const fileId = currentRunState.currentFile;
+
+      // --- NEW: Intercept 01 Approval to prompt for A la Carte modules ---
+      if (fileId === "01" && !currentRunState?.selectedModules) {
+        const selectedModules = await promptForModules();
+        
+        // Patch the modules
+        try {
+          const patchResp = await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/modules`,{
+            method:"PATCH",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({
+              selectedModules,
+              workspace: workspacePath ? {path:workspacePath} : undefined
+            })
+          });
+          if (!patchResp.ok) {
+            const errData = await patchResp.json();
+            addLog("错误", errData?.message || "配置架构模块失败", "error");
+            return; // Abort approval if patch fails
+          }
+          currentRunState.selectedModules = selectedModules;
+        } catch (e) {
+          addLog("错误", "配置架构模块网络异常", "error");
+          return;
+        }
+      }
+      // ------------------------------------------------------------------
+
       const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/files/${encodeURIComponent(fileId)}/approve`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -1661,25 +1788,207 @@
       filePreviewDirty = false;
       await refreshFilewiseRun();
     }
+    function openChatModal() {
+      const inputEl = document.getElementById("businessGoalInput");
+      const chatInput = document.getElementById("chatInput");
+      const goal = (inputEl ? inputEl.value : "").trim();
+      
+      if (goal && chatMessages.length === 0) {
+        chatInput.value = goal;
+      }
+      
+      renderChatMessages();
+      document.getElementById("chatModal").style.display = "flex";
+      setTimeout(() => chatInput.focus(), 100);
+    }
+    
+    function closeChatModal() {
+      document.getElementById("chatModal").style.display = "none";
+    }
+
+    // ==========================================
+    // Phase 2: AI Co-pilot Chat Logic
+    // ==========================================
+    let chatMessages = [];
+
+    function renderChatMessages() {
+      const container = document.getElementById("chatHistory");
+      if (!container) return;
+      container.innerHTML = `
+        <div class="chat-bubble ai">
+          你好！我是 J-AP Plus 架构助手。<br><br>
+          请告诉我你想做一个什么样的软件？我们可以边聊边构思。如果你已经想得很清楚了，也可以直接输入，然后点击下方的【一键固化为需求草案 (01)】直接立项！
+        </div>
+      `;
+      chatMessages.forEach(msg => {
+        const div = document.createElement("div");
+        div.className = `chat-bubble ${msg.role === "user" ? "user" : "ai"}`;
+        
+        if (msg.role === "ai" && window.marked) {
+          // Use marked to parse Markdown and render HTML
+          div.innerHTML = window.marked.parse(msg.content);
+        } else {
+          div.textContent = msg.content;
+        }
+        
+        container.appendChild(div);
+      });
+      container.scrollTop = container.scrollHeight;
+    }
+
+    async function sendChatMessage() {
+      const inputEl = document.getElementById("chatInput");
+      const content = (inputEl.value || "").trim();
+      if (!content) return;
+      
+      const llm = buildTaskLlmConfig();
+      if (!llm) {
+        addLog("错误", "请先在设置中配置 API Key", "error");
+        openSettings();
+        return;
+      }
+
+      // Add user message
+      chatMessages.push({ role: "user", content });
+      inputEl.value = "";
+      renderChatMessages();
+
+      // Add thinking placeholder
+      const container = document.getElementById("chatHistory");
+      const thinkingDiv = document.createElement("div");
+      thinkingDiv.className = "chat-bubble ai";
+      thinkingDiv.id = "chatThinking";
+      thinkingDiv.innerHTML = `<span style="color:var(--muted)">正在思考...</span>`;
+      container.appendChild(thinkingDiv);
+      container.scrollTop = container.scrollHeight;
+
+      try {
+        const resp = await fetch(API_BASE + "/api/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: chatMessages,
+            llm
+          })
+        });
+
+        if (!resp.ok) {
+          const data = await resp.json();
+          const tDiv = document.getElementById("chatThinking");
+          if (tDiv) tDiv.remove();
+          addLog("错误", data?.message || "对话请求失败", "error");
+          return;
+        }
+
+        // Change thinking div to receive stream
+        thinkingDiv.id = ""; // remove id so it's a normal bubble
+        thinkingDiv.innerHTML = "";
+        
+        let aiFullContent = "";
+        
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let done = false;
+        
+        while (!done) {
+          const { value, done: doneReading } = await reader.read();
+          done = doneReading;
+          if (value) {
+            const chunk = decoder.decode(value, { stream: true });
+            // The chunk might contain multiple SSE messages like "data: xxx\n\n"
+            const lines = chunk.split("\n");
+            for (let line of lines) {
+              if (line.startsWith("data: ")) {
+                const dataStr = line.substring(6);
+                if (dataStr === "[DONE]") {
+                  done = true;
+                  break;
+                }
+                try {
+                  const dataObj = JSON.parse(dataStr);
+                  const text = dataObj.text || "";
+                  aiFullContent += text;
+                  // Update UI continuously
+                  if (window.marked) {
+                    thinkingDiv.innerHTML = window.marked.parse(aiFullContent);
+                  } else {
+                    thinkingDiv.textContent = aiFullContent;
+                  }
+                  container.scrollTop = container.scrollHeight;
+                } catch (e) {
+                  // ignore parse error on partial chunks
+                }
+              }
+            }
+          }
+        }
+        
+        // Add final message to history
+        chatMessages.push({ role: "ai", content: aiFullContent });
+      } catch (error) {
+        const tDiv = document.getElementById("chatThinking");
+        if (tDiv) tDiv.remove();
+        addLog("错误", String(error?.message || error), "error");
+      }
+    }
+
+    // Handle Enter key in chat input
+    document.addEventListener("DOMContentLoaded", () => {
+      const chatInput = document.getElementById("chatInput");
+      if (chatInput) {
+        chatInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendChatMessage();
+          }
+        });
+      }
+    });
+
     async function startDesignOnly(){
-      let requirement=(finalizedRequirement||"").trim();
-      if(!requirement){ requirement=(document.getElementById("businessGoalInput").value||"").trim(); }
-      if(!requirement){ addLog("错误","请先输入业务目标并完成澄清","error"); return; }
-      if(finalizeInProgress){ addLog("系统","需求定稿仍在后台处理中，请稍候..."); return; }
-      if(finalizeModalOpen){ addLog("系统","请先在定稿窗口中确认需求。"); return; }
+      const chatInputEl = document.getElementById("chatInput");
+      const businessGoalEl = document.getElementById("businessGoalInput");
+      
+      let chatRequirement = (chatInputEl ? chatInputEl.value : "").trim();
+      let businessGoal = (businessGoalEl ? businessGoalEl.value : "").trim();
+      
+      // If user typed something in chat but didn't send, include it
+      if (chatRequirement) {
+        chatMessages.push({ role: "user", content: chatRequirement });
+        if (chatInputEl) chatInputEl.value = "";
+        renderChatMessages();
+      }
+      
+      // Build final requirement string from chat history and business goal
+      let finalRequirement = chatMessages
+        .map(m => `${m.role === "user" ? "用户" : "AI架构师"}: ${m.content}`)
+        .join("\n\n---\n\n");
+        
+      if (!finalRequirement && businessGoal) {
+        finalRequirement = businessGoal;
+      }
+        
+      if (!finalRequirement) {
+        addLog("错误", "请先在左侧输入一句话业务点子或与助手对话", "error");
+        return;
+      }
+      
       const llm=buildTaskLlmConfig(); if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
       const workspace=workspacePath ? { path:workspacePath } : (getWorkspacePathConfig()||{});
+      
       designSubmitting = true;
       refreshDesignButtonState();
-      addLog("系统","正在提交设计任务...");
+      addLog("系统","沙盒模式：正在将多轮对话上下文打包，直接创建设计任务...");
+      
       try{
         const payload = {
-          requirement,
+          requirement: finalRequirement,
           llm,
           workspace,
-          questionnaire: { questions: getFlattenQuestionnaire() },
-          userAnswers:normalizeAnswersForApi()
+          // Sandbox mode bypasses questionnaire
+          questionnaire: { questions: [] },
+          userAnswers: {}
         };
         const resp=await fetch(API_BASE+"/api/v1/tasks/filewise/start",{
           method:"POST",
@@ -1698,8 +2007,13 @@
         selectedFileId = null;
         setTaskIdentity(currentRunId, "--");
         connectWebSocketForTask(currentRunId);
+        closeChatModal();
         await refreshFilewiseRun();
         addLog("系统",`任务创建成功：${currentRunId}`,"success");
+        
+        // Auto trigger next immediately for sandbox mode to generate 01 draft
+        addLog("系统","正在自动生成 01_需求草案...");
+        await filewiseGenerateBaseNext();
       }catch(error){ addLog("错误",String(error?.message||error),"error"); }
       finally { designSubmitting = false; refreshDesignButtonState(); }
     }

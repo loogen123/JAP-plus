@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>J-Architect-Pilot</title>
   <script src="/vendor/tailwindcdn.js"></script>
+  <!-- 引入 marked.js 解析 Markdown -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
@@ -14,13 +16,33 @@
   </header>
 
   <section class="layout">
-    <aside class="panel">
-      <div class="hd"><h2 class="title">需求控制台</h2><p class="sub">只输入业务目标，系统自动澄清后进入设计流程</p></div>
-      <div class="bd scroll">
-        <div class="label">业务目标 *</div>
-        <textarea id="businessGoalInput" class="field" placeholder="例如：实现多租户 SaaS 扫码点餐系统，支持门店、订单、支付、权限隔离。"></textarea>
-        <div class="action-row"><button class="btn btn-light" onclick="generateQuestionnaire()">1. AI 澄清</button><button class="btn btn-primary" id="designBtn" onclick="startDesignOnly()">2. 生成设计套件</button><button class="btn btn-light" onclick="openHistoryModal()">历史任务</button></div>
+    <aside class="panel" style="display:flex;flex-direction:column;max-height:calc(100vh - 56px);">
+      <div class="hd"><h2 class="title">需求控制台</h2><p class="sub">选择一种立项方式，开启您的设计之旅</p></div>
+      <div class="bd" style="flex:1;display:flex;flex-direction:column;padding:20px;gap:16px;">
+        <div class="label">一句话业务点子 *</div>
+        <textarea id="businessGoalInput" class="field" style="min-height:100px;" placeholder="例如：我想做一个基于 NestJS 的极简待办事项 API..."></textarea>
+        
+        <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px;">
+          <!-- 卡片 1: 向导模式 -->
+          <div class="toggle-card" onclick="generateQuestionnaire()" style="cursor:pointer;border-color:var(--line);min-height:80px;">
+            <div class="toggle-card-content" style="height:100%;padding:16px;">
+              <span class="toggle-title" style="font-size:16px;display:flex;align-items:center;gap:8px;margin-bottom:8px;">🎯 向导模式</span>
+              <span class="toggle-desc" style="line-height:1.5;font-size:13px;">系统根据您的话，生成结构化问卷帮您理清思路。</span>
+            </div>
+          </div>
+          
+          <!-- 卡片 2: 沙盒模式 -->
+          <div class="toggle-card" onclick="openChatModal()" style="cursor:pointer;border-color:#5fa2ff;min-height:80px;">
+            <div class="toggle-card-content" style="height:100%;background:#f0f7ff;border-color:#5fa2ff;padding:16px;">
+              <span class="toggle-title" style="font-size:16px;color:#2f5d9e;display:flex;align-items:center;gap:8px;margin-bottom:8px;">💬 沙盒模式 (Chat)</span>
+              <span class="toggle-desc" style="line-height:1.5;font-size:13px;color:#4a6a96;">进入独立对话框，与 AI 结对构思，聊透了再一键立项。</span>
+            </div>
+          </div>
+        </div>
 
+        <div style="text-align:center;margin-top:24px;margin-bottom:12px;">
+          <button class="btn btn-light" style="font-size:14px;padding:10px 24px;width:100%;max-width:200px;border-radius:20px;box-shadow:0 2px 6px rgba(0,0,0,0.05);" onclick="openHistoryModal()">查看历史任务</button>
+        </div>
       </div>
     </aside>
 
@@ -58,10 +80,33 @@
       <div class="bd workspace">
         <div><div class="kv"><span>状态</span><span id="workspaceStage">就绪</span></div><div class="kv"><span>进度</span><span id="workspaceProgressText">0%</span></div><div class="progress-track"><div id="workspaceProgressBar" class="progress-bar"></div></div></div>
         <div><div class="kv"><span>文件列表</span><span id="artifactCount">0 个</span></div><div id="fileTree" class="tree" style="min-height:300px;max-height:calc(100vh - 350px);">暂无生成文件</div></div>
-        <div><div class="kv"><span>工作目录</span><span id="workspacePathLabel">output</span></div><div id="workspaceStatus" style="font-size:13px;color:var(--muted);">未设置</div><div class="flex gap-2" style="margin-top:12px;flex-direction:column;gap:8px;"><button id="btnGenerateBase" class="btn btn-primary" style="width:100%;padding:12px;" onclick="filewiseGenerateBaseNext()">生成设计工件</button><button id="btnAutoRun" class="btn btn-light" style="width:100%;padding:12px;border-color:#a8c5ff;color:#2f5d9e;background:#f2f7ff;" onclick="toggleAutoRun()">一键自动生成前7文件 (免审核)</button><button id="btnGenerateSddCurrent" class="btn btn-light" style="width:100%;padding:12px;" onclick="generateSddFromCurrentRun()">根据当前任务继续生成SDD</button><button id="btnGenerateSdd" class="btn btn-light" style="width:100%;padding:12px;" onclick="openSddSourceModal()">生成SDD文件(历史流程)</button></div></div>
+        <div><div class="kv"><span>工作目录</span><span id="workspacePathLabel">output</span></div><div id="workspaceStatus" style="font-size:13px;color:var(--muted);">未设置</div><div class="flex gap-2" style="margin-top:12px;flex-direction:column;gap:8px;"><button id="btnGenerateNext" class="btn btn-primary" style="width:100%;padding:12px;" onclick="filewiseGenerateNext()">生成下一步工件</button><button id="btnAutoRun" class="btn btn-light" style="width:100%;padding:12px;border-color:#a8c5ff;color:#2f5d9e;background:#f2f7ff;" onclick="toggleAutoRun()">一键自动流转 (免人工审核)</button><button class="btn btn-light" style="width:100%;padding:12px;" onclick="openTasksSourceModal()">导入前置设计直接生成 07</button></div></div>
       </div>
     </aside>
   </section>
+
+  <!-- Chat Sandbox Modal -->
+  <div id="chatModal" class="modal">
+    <div class="modal-card" style="width:min(800px,90vw); height:min(700px,90vh); display:flex; flex-direction:column; padding:0;">
+      <div class="modal-hd" style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--line);">
+        <div style="display:flex; flex-direction:column;">
+          <span style="font-size:16px; font-weight:600;">💬 沙盒模式 (AI Co-pilot)</span>
+          <span style="font-size:12px; color:var(--muted);">与 AI 结对构思，随时一键固化为需求草案</span>
+        </div>
+        <button class="btn btn-light" style="padding:4px 8px; font-size:12px;" onclick="closeChatModal()">X</button>
+      </div>
+      <div id="chatHistory" style="flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:16px; background:#f8f9fa;">
+        <!-- Chat messages will be rendered here -->
+      </div>
+      <div style="padding:16px 20px; background:white; border-top:1px solid var(--line);">
+        <textarea id="chatInput" class="field" style="min-height:80px; margin-bottom:12px;" placeholder="描述你的业务需求，按 Enter 发送..."></textarea>
+        <div class="action-row" style="display:flex; gap:12px;">
+          <button class="btn btn-light" style="flex:1; padding:10px;" onclick="sendChatMessage()">发送消息 (Chat)</button>
+          <button class="btn btn-primary" style="flex:1; padding:10px;" id="designBtn" onclick="startDesignOnly()">一键固化为需求草案 (01)</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="fileReviewModal" class="modal">
     <div class="modal-card" style="width:min(900px,90vw);">
@@ -87,7 +132,60 @@
   <div id="questionnaireModal" class="modal"><div class="modal-card"><div class="modal-hd">需求澄清问卷</div><div class="modal-bd"><div id="questionProgress" style="font-size:13px;color:var(--muted);"></div><div id="questionTitle" style="font-size:16px;font-weight:600;"></div><div id="questionDimension" style="font-size:13px;color:#4f719f;"></div><div id="questionType" style="font-size:12px;color:#5a7aa7;"></div><div id="questionOptions"></div></div><div class="modal-ft"><button class="btn btn-light" id="prevQuestionBtn" onclick="prevQuestion()">上一题</button><button class="btn btn-light" id="nextQuestionBtn" onclick="nextQuestion()">下一题</button><button class="btn btn-primary" id="finishQuestionBtn" onclick="finishQuestionnaire(false)">完成问卷</button></div></div></div>
   <div id="finalizeModal" class="modal"><div class="modal-card"><div class="modal-hd">需求定稿确认</div><div class="modal-bd"><div style="font-size:13px;color:var(--muted);">系统已基于当前问卷与答案自动生成定稿。你可以直接修改后确认。</div><textarea id="finalRequirementEditor" class="field" style="min-height:280px;"></textarea></div><div class="modal-ft"><button class="btn btn-light" onclick="regenerateFinalRequirement()">重新生成</button><button class="btn btn-light" onclick="closeFinalizeModal()">取消</button><button class="btn btn-primary" onclick="confirmFinalRequirement()">确认并继续</button></div></div></div>
   <div id="historyModal" class="modal"><div class="modal-card history-modal-card"><div class="modal-hd">历史需求任务</div><div class="modal-bd"><div class="history-workspace"><input id="historyWorkspacePath" class="field" placeholder="选择包含 tasks/_draft 的目录" /><button class="btn btn-light" onclick="chooseHistoryWorkspaceFolder()">选择目录</button><button class="btn btn-light" onclick="loadHistoryList()">刷新</button></div><div class="history-layout"><div id="historyList" class="history-list"></div><div class="history-preview-wrap"><div id="historyTabs" class="history-tabs"></div><div id="historyPreview" class="history-preview"></div><div class="history-ft"><div id="historySelectionInfo" style="font-size:13px;color:var(--muted);">未选择历史任务</div><button id="historyContinueBtn" class="btn btn-primary" onclick="continueFromHistory()" disabled>基于此任务继续生成</button></div></div></div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeHistoryModal()">关闭</button></div></div></div>
-  <div id="sddSourceModal" class="modal"><div class="modal-card history-modal-card"><div class="modal-hd">选择历史1-7流程</div><div class="modal-bd"><div class="history-workspace"><input id="sddSourceWorkspacePath" class="field" placeholder="选择包含 tasks 的目录" /><button class="btn btn-light" onclick="chooseSddSourceWorkspaceFolder()">选择目录</button><button class="btn btn-light" onclick="loadSddSourceRuns()">刷新</button></div><div id="sddSourceList" class="history-list"></div><div id="sddSourceInfo" style="font-size:13px;color:var(--muted);margin-top:8px;">未选择历史流程</div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeSddSourceModal()">取消</button><button id="sddSourceConfirmBtn" class="btn btn-primary" onclick="confirmGenerateSddWithSource()" disabled>确认生成SDD</button></div></div></div>
+  <div id="tasksSourceModal" class="modal"><div class="modal-card history-modal-card"><div class="modal-hd">选择前置设计导入</div><div class="modal-bd"><div class="history-workspace"><input id="tasksSourceWorkspacePath" class="field" placeholder="选择包含 tasks 的目录" /><button class="btn btn-light" onclick="chooseTasksSourceWorkspaceFolder()">选择目录</button><button class="btn btn-light" onclick="loadTasksSourceRuns()">刷新</button></div><div id="tasksSourceList" class="history-list"></div><div id="tasksSourceInfo" style="font-size:13px;color:var(--muted);margin-top:8px;">未选择历史流程</div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeTasksSourceModal()">取消</button><button id="tasksSourceConfirmBtn" class="btn btn-primary" onclick="confirmGenerateTasksWithSource()" disabled>确认生成任务清单(Tasks)</button></div></div></div>
+
+  <!-- A la Carte Design Dialog -->
+  <div id="moduleSelectionModal" class="modal">
+    <div class="modal-card" style="width: 480px;">
+      <div class="modal-hd">架构选配模块 (A la Carte Design)</div>
+      <div class="modal-bd">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
+          需求草案 (01) 已通过！请按需勾选你要生成的后续设计模块。系统将并发生成以节省时间。
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <label class="toggle-card">
+            <input type="checkbox" id="mod02" value="02" checked disabled>
+            <div class="toggle-card-content" style="opacity:0.8;cursor:not-allowed;">
+              <span class="toggle-title">02_数据库结构 <span style="font-size:12px;color:var(--red);font-weight:normal;">(必选)</span></span>
+              <span class="toggle-desc">表结构、关联与索引设计</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="mod03" value="03" checked>
+            <div class="toggle-card-content">
+              <span class="toggle-title">03_状态机</span>
+              <span class="toggle-desc">核心业务状态迁移逻辑</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="mod04" value="04" checked disabled>
+            <div class="toggle-card-content" style="opacity:0.8;cursor:not-allowed;">
+              <span class="toggle-title">04_API接口 <span style="font-size:12px;color:var(--red);font-weight:normal;">(必选)</span></span>
+              <span class="toggle-desc">RESTful API 契约与出入参</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="mod05" value="05" checked>
+            <div class="toggle-card-content">
+              <span class="toggle-title">05_前端页面</span>
+              <span class="toggle-desc">页面与组件树结构设计</span>
+            </div>
+          </label>
+          <label class="toggle-card" style="grid-column:span 2;">
+            <input type="checkbox" id="mod06" value="06" checked>
+            <div class="toggle-card-content">
+              <span class="toggle-title">06_API调试集合</span>
+              <span class="toggle-desc">自动生成供 Postman 等工具导入的测试集合</span>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="modal-ft" style="justify-content:flex-end;display:flex;gap:12px;">
+        <button class="btn btn-primary" onclick="confirmModuleSelection()">确认并开始生成</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/js/main.js"></script>
 </body>
 </html>

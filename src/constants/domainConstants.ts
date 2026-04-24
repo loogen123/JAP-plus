@@ -10,10 +10,9 @@ export const ARTIFACT_FILES = {
   modeling02: "02_\u9886\u57df\u6a21\u578b\u4e0e\u7269\u7406\u8868\u7ed3\u6784.md",
   modeling03: "03_\u6838\u5fc3\u4e1a\u52a1\u72b6\u6001\u673a.md",
   modeling04: "04_RESTful_API\u5951\u7ea6.yaml",
-  detailing05: "05_\u884c\u4e3a\u9a71\u52a8\u9a8c\u6536\u6d4b\u8bd5.md",
-  detailing06: "06_UI\u539f\u578b\u4e0e\u4ea4\u4e92\u8349\u56fe.html",
-  detailing07: "07_API\u8c03\u8bd5\u96c6\u5408.json",
-  sdd08: "08_SDD_\u8f6f\u4ef6\u8bbe\u8ba1\u8bf4\u660e\u4e66.md",
+  detailing05: "05_UI\u539f\u578b\u4e0e\u4ea4\u4e92\u8349\u56fe.html",
+  detailing06: "06_API\u8c03\u8bd5\u96c6\u5408.json",
+  sdd07: "07_Actionable_Tasks.md",
 } as const;
 
 export const MODELING_ARTIFACT_KEYS = [
@@ -21,4 +20,14 @@ export const MODELING_ARTIFACT_KEYS = [
   ARTIFACT_FILES.modeling02,
   ARTIFACT_FILES.modeling03,
   ARTIFACT_FILES.modeling04,
+] as const;
+
+export const FILEWISE_STATUS_ORDER = [
+  "01",
+  "02",
+  "03",
+  "04",
+  "05",
+  "06",
+  "07",
 ] as const;

@@ -386,7 +386,7 @@ export type FileRunStatus = "PENDING" | "GENERATING" | "GENERATED" | "REVIEWING"
 export type FileRunStage = "MODELING" | "REVIEW" | "DETAILING" | "DONE";
 export type FileRunMode = "legacy" | "filewise";
 
-const FILEWISE_STATUS_ORDER = ["01", "02", "03", "04", "05", "06", "07", "08"] as const;
+const FILEWISE_STATUS_ORDER = ["01", "02", "03", "04", "05", "05", "06", "07"] as const;
 export type FileId = (typeof FILEWISE_STATUS_ORDER)[number];
 export type ArtifactFileId = FileId;
 
@@ -402,17 +402,15 @@ const FILE_SPECS: ReadonlyArray<FileSpec> = [
   { fileId: "02", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling02, ext: "md" },
   { fileId: "03", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling03, ext: "md" },
   { fileId: "04", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling04, ext: "yaml" },
-  { fileId: "05", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing05, ext: "md" },
-  { fileId: "06", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing06, ext: "html" },
-  { fileId: "07", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing07, ext: "json" },
-  { fileId: "08", stage: "DETAILING", artifactName: ARTIFACT_FILES.sdd08, ext: "md" },
+  { fileId: "05", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing05, ext: "html" },
+  { fileId: "06", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing06, ext: "json" },
+  { fileId: "07", stage: "DETAILING", artifactName: ARTIFACT_FILES.sdd07, ext: "md" },
 ];
 
 const MODELING_FILE_IDS: ArtifactFileId[] = ["01", "02", "03", "04"];
-const DETAILING_FILE_IDS: ArtifactFileId[] = ["05", "06", "07", "08"];
+const DETAILING_FILE_IDS: ArtifactFileId[] = ["05", "06", "07"];
 const FILEWISE_CONTEXT_LIMIT = 10000;
 const FILEWISE_OUTPUT_LIMIT = 16000;
-
 
 const FILE_TO_ARTIFACT_KEY: Record<ArtifactFileId, string> = {
   "01": ARTIFACT_FILES.modeling01,
@@ -421,8 +419,7 @@ const FILE_TO_ARTIFACT_KEY: Record<ArtifactFileId, string> = {
   "04": ARTIFACT_FILES.modeling04,
   "05": ARTIFACT_FILES.detailing05,
   "06": ARTIFACT_FILES.detailing06,
-  "07": ARTIFACT_FILES.detailing07,
-  "08": ARTIFACT_FILES.sdd08,
+  "07": ARTIFACT_FILES.sdd07,
 };
 
 export type FileRunFileState = {
@@ -447,6 +444,7 @@ export type FileRunMeta = {
   userAnswers: Record<string, string | string[]>;
   llm: LlmConfig;
   workspacePath: string;
+  selectedModules?: string[]; // Add selected modules for A la Carte Design
   status: "RUNNING" | "DONE" | "FAILED";
   files: FileRunFileState[];
   createdAt: string;
@@ -507,18 +505,18 @@ export function getRunPaths(workspacePath: string, runId: string): FileRunRuntim
 }
 
 function isBaseFilesApproved(meta: FileRunMeta): boolean {
-  return ["01", "02", "03", "04", "05", "06", "07"].every((fileId) => {
-    const state = meta.files.find((item) => item.fileId === fileId);
-    return state?.status === "APPROVED";
-  });
+  return meta.files
+    .filter((item) => item.fileId !== "07")
+    .every((item) => item.status === "APPROVED");
 }
 
 async function isBaseFilesReadyOnDisk(meta: FileRunMeta): Promise<boolean> {
   if (!isBaseFilesApproved(meta)) {
     return false;
   }
-  for (const fileId of ["01", "02", "03", "04", "05", "06", "07"] as const) {
-    const filePath = toRunFilePath(meta.workspacePath, meta.runId, fileId);
+  const baseFiles = meta.files.filter((item) => item.fileId !== "07");
+  for (const file of baseFiles) {
+    const filePath = toRunFilePath(meta.workspacePath, meta.runId, file.fileId);
     try {
       const stat = await fs.stat(filePath);
       if (stat.size === 0) {
@@ -566,9 +564,11 @@ export async function listSddSourceRuns(
 export async function importBaseFilesFromRun(meta: FileRunMeta, sourceRunId: string): Promise<void> {
   const sourceMeta = await readMeta(meta.workspacePath, sourceRunId);
   if (!isBaseFilesApproved(sourceMeta)) {
-    throw new Error("历史任务未完成01-07审核通过，不能用于SDD生成");
+    throw new Error("历史任务未完成基础设计阶段审核通过，不能用于SDD生成");
   }
-  for (const fileId of ["01", "02", "03", "04", "05", "06", "07"] as const) {
+  const baseFiles = meta.files.filter(f => f.fileId !== "07");
+  for (const file of baseFiles) {
+    const fileId = file.fileId;
     const body = await readFileBody(meta.workspacePath, sourceRunId, fileId);
     if (!body.trim()) {
       throw new Error(`历史任务 ${sourceRunId} 的文件 ${fileId} 内容为空`);
@@ -580,7 +580,7 @@ export async function importBaseFilesFromRun(meta: FileRunMeta, sourceRunId: str
       fallbackReason: `imported-from-${sourceRunId}`,
     });
   }
-  upsertFileState(meta, "08", { status: "PENDING", lastError: null });
+  upsertFileState(meta, "07", { status: "PENDING", lastError: null });
   await saveMeta(meta);
   await appendEventLog(meta.workspacePath, meta.runId, "SDD_SOURCE_IMPORTED", {
     sourceRunId,
@@ -663,7 +663,7 @@ export function deriveStageFromCurrentFile(fileId: FileId | null): FileRunStage 
   if (!fileId) {
     return "DONE";
   }
-  return ["05", "06", "07", "08"].includes(fileId) ? "DETAILING" : "MODELING";
+  return ["05", "05", "06", "07"].includes(fileId) ? "DETAILING" : "MODELING";
 }
 
 export function resolveCurrentFile(files: FileRunFileState[]): FileId | null {
@@ -680,8 +680,8 @@ export function getFileRuntimeRecord(meta: FileRunMeta): FileRuntimeRecord {
   const current = meta.currentFile ? meta.files.find((item) => item.fileId === meta.currentFile) ?? null : null;
   const currentStatus = current?.status ?? null;
   const sddPrerequisitesReady =
-    meta.currentFile !== "08" ||
-    meta.files.filter((item) => item.fileId !== "08").every((item) => item.status === "APPROVED");
+    meta.currentFile !== "07" ||
+    meta.files.filter((item) => item.fileId !== "07").every((item) => item.status === "APPROVED");
   const baseCanGenerateNext = currentStatus === "PENDING" || currentStatus === "FAILED" || currentStatus === "REJECTED";
   return {
     runId: meta.runId,
@@ -712,12 +712,18 @@ export function toFileStatusResponse(meta: FileRunMeta, workspacePath: string): 
     workspacePath,
     files: meta.files,
     actions: getFileRuntimeRecord(meta).actions,
+    selectedModules: meta.selectedModules,
   };
 }
 
-export function createInitialFileStates(): FileRunFileState[] {
+export function createInitialFileStates(selectedModules?: string[]): FileRunFileState[] {
   const now = nowIso();
-  return FILE_SPECS.map((spec) => ({
+  let specs = FILE_SPECS;
+  if (selectedModules && selectedModules.length > 0) {
+    const allowed = new Set([...selectedModules, "01", "07"]);
+    specs = FILE_SPECS.filter((spec) => allowed.has(spec.fileId));
+  }
+  return specs.map((spec) => ({
     fileId: spec.fileId,
     artifactName: spec.artifactName,
     status: "PENDING",
@@ -781,62 +787,6 @@ export function summarizeText(input: string): string {
 }
 
 const approvedSummaryCache = new Map<string, { mtime: number, summary: string }>();
-
-async function loadSelectiveSummary(meta: FileRunMeta, targetFileId: FileId): Promise<string> {
-  const CONTEXT_DEPENDENCIES: Record<FileId, FileId[]> = {
-    "01": [],
-    "02": ["01"],
-    "03": ["02"],
-    "04": ["02", "03"],
-    "05": ["01", "04"],
-    "06": ["01", "04"],
-    "07": ["04"],
-    "08": ["01", "02", "03", "04", "05", "06", "07"],
-  };
-  
-  const deps = CONTEXT_DEPENDENCIES[targetFileId] ?? [];
-  const records: string[] = [];
-  const promises = meta.files.map(async (file) => {
-    if (file.status !== "APPROVED" || !deps.includes(file.fileId)) {
-      return null;
-    }
-    const filePath = toRunFilePath(meta.workspacePath, meta.runId, file.fileId);
-    try {
-      const stat = await fs.stat(filePath);
-      const cacheKey = `${filePath}:${stat.mtimeMs}`;
-      if (approvedSummaryCache.has(filePath)) {
-        const cached = approvedSummaryCache.get(filePath)!;
-        if (cached.mtime === stat.mtimeMs) {
-          return `${file.fileId} ${file.artifactName}: ${cached.summary}`;
-        }
-      }
-      
-      const content = await fs.readFile(filePath, "utf-8");
-      if (!content.trim()) {
-        return null;
-      }
-      const summary = summarizeText(content);
-      approvedSummaryCache.set(filePath, { mtime: stat.mtimeMs, summary });
-      
-      if (approvedSummaryCache.size > 1000) {
-        const keysToEvict = Array.from(approvedSummaryCache.keys()).slice(0, 200);
-        for (const key of keysToEvict) {
-          approvedSummaryCache.delete(key);
-        }
-      }
-      
-      return `${file.fileId} ${file.artifactName}: ${summary}`;
-    } catch {
-      return null;
-    }
-  });
-
-  const results = await Promise.all(promises);
-  for (const res of results) {
-    if (res) records.push(res);
-  }
-  return records.join("\n");
-}
 
 export async function loadApprovedArtifactSummary(meta: FileRunMeta): Promise<string> {
   const records: string[] = [];
@@ -1031,7 +981,7 @@ export function buildDetailingPrompt(fileId: ArtifactFileId, requirement: string
 
 export function buildSddPrompt(requirement: string, approvedSummary: string, evidence: string, qa: string, skill: string): string {
   return [
-    `Target file: ${ARTIFACT_FILES.sdd08}`,
+    `Target file: ${ARTIFACT_FILES.sdd07}`,
     "Requirement:",
     clampText(requirement, FILEWISE_CONTEXT_LIMIT),
     "",
@@ -1045,9 +995,12 @@ export function buildSddPrompt(requirement: string, approvedSummary: string, evi
     clampText(qa, 3000),
     "",
     "Constraints:",
-    "SDD must be engineering-ready and implementation-oriented.",
+    "THIS IS THE FINAL ARTIFACT. DO NOT write a traditional long-form Software Design Document.",
+    "Instead, you MUST output a highly actionable, structured developer checklist (Tasks Checklist).",
+    "Each task MUST be a specific, actionable step (e.g. creating a file, writing a function, creating a table) and start with a markdown checkbox `- [ ]`.",
+    "Group tasks logically (e.g. `## 1. Database & Models`, `## 2. API Implementation`, `## 3. Frontend Components`).",
+    "Include specific file paths and function signatures where applicable.",
     "Keep all entity/API/table/state naming consistent with intermediate artifacts.",
-    "If a detail is not determined by requirement or intermediate artifacts, use 建议/默认方案/可选项 wording and do not fabricate facts.",
     "You MUST include the appendix JSON constraint block wrapped by markers: <!-- SDD_CONSTRAINTS_JSON_BEGIN --> and <!-- SDD_CONSTRAINTS_JSON_END -->.",
     "",
     "Skill context:",
@@ -1055,7 +1008,7 @@ export function buildSddPrompt(requirement: string, approvedSummary: string, evi
   ].join("\n");
 }
 
-const SDD_EVIDENCE_FILE_IDS: ReadonlyArray<FileId> = ["01", "02", "03", "04", "05", "06", "07"];
+
 
 export function extractSddConstraintsFromMarkdown(markdown: string): SddConstraints {
   const markerMatch = markdown.match(
@@ -1399,37 +1352,25 @@ async function validateSddGate(
 }
 
 async function loadSddEvidence(meta: FileRunMeta): Promise<string> {
-  const pruningEnabled = process.env.ENABLE_SDD_EVIDENCE_PRUNING !== "false";
   // SDD 作为最终交付物，需要尽可能基于 01~07 的实际产物做一致性约束；因此这里将已生成文件正文按片段注入提示词，减少模型编造与前后矛盾。
-  const maxCharsByFile: Partial<Record<FileId, number>> = pruningEnabled ? {
-    "01": 500,
-    "02": 3000,
-    "03": 1500,
-    "04": 4000,
-    "05": 800,
-    "06": 0, // B5-4: 跳过 HTML 对 SDD 无结构价值
-    "07": 500,
-  } : {
+  const maxCharsByFile: Partial<Record<FileId, number>> = {
     "01": 5000,
     "02": 8000,
     "03": 6000,
     "04": 12000,
     "05": 5000,
     "06": 5000,
-    "07": 5000,
   };
 
   const blocks: string[] = [];
-  for (const fileId of SDD_EVIDENCE_FILE_IDS) {
+  const baseFiles = meta.files.filter(f => f.fileId !== "07");
+  for (const file of baseFiles) {
+    const fileId = file.fileId;
     try {
-      const maxChars = maxCharsByFile[fileId] ?? 2000;
-      if (maxChars <= 0) continue;
-      
       const raw = await readFileBody(meta.workspacePath, meta.runId, fileId);
       const text = raw.trim();
       if (!text) continue;
-      
-      // B5-4: 针对 02/03/04 可以做进一步的结构化提取，这里为了安全起见我们先利用缩减截断，配合已有的 parseTableColumns 等在未来进一步精细化。
+      const maxChars = maxCharsByFile[fileId] ?? 2000;
       blocks.push(`--- ${FILE_TO_ARTIFACT_KEY[fileId]} ---\n${clampText(text, maxChars)}\n`);
     } catch {
       continue;
@@ -1492,7 +1433,7 @@ export async function generateArtifactByLlm(
     ? clampText(meta.requirement, 6000)
     : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
 
-  const sddEvidence = fileId === "08" ? await loadSddEvidence(meta) : "";
+  const sddEvidence = fileId === "07" ? await loadSddEvidence(meta) : "";
 
   let extraPrompt = "";
   if (minimalist) {
@@ -1504,13 +1445,13 @@ export async function generateArtifactByLlm(
       extraPrompt = "\nForce output complete MySQL DDL table creation statements, including PK, FK, indexes (uk_, idx_) and business constraints.";
     } else if (fileId === "04") {
       extraPrompt = "\nForce output OpenAPI 3.0 YAML specification, including $ref definitions for request/response.";
-    } else if (fileId === "06") {
+    } else if (fileId === "05") {
       extraPrompt = "\nForce output pure HTML content. DO NOT prefix or suffix the HTML with any markdown text or explanations. Start strictly with <!DOCTYPE html>.";
     }
   }
 
   const prompt =
-    fileId === "08"
+    fileId === "07"
       ? buildSddPrompt(requirement, approvedSummary, sddEvidence, qa, skill) + extraPrompt
       : MODELING_FILE_IDS.includes(fileId)
         ? buildModelingPrompt(fileId, requirement, approvedSummary, qa, skill) + extraPrompt
@@ -1518,7 +1459,7 @@ export async function generateArtifactByLlm(
 
   const baseSystemPrompt = MODELING_FILE_IDS.includes(fileId)
     ? MODELING_NODE_SYSTEM_PROMPT
-    : fileId === "08"
+    : fileId === "07"
       ? SDD_NODE_SYSTEM_PROMPT
       : DETAILING_NODE_SYSTEM_PROMPT;
 
@@ -1546,9 +1487,9 @@ export async function generateArtifactByLlm(
   }
 
   // 针对 HTML 输出可能被 Markdown包裹的进一步清理
-  if (fileId === "06" && content.startsWith("<!DOCTYPE html>") && content.includes("```html")) {
+  if (fileId === "05" && content.startsWith("<!DOCTYPE html>") && content.includes("```html")) {
     content = content.replace(/```html/g, "").replace(/```/g, "").trim();
-  } else if (fileId === "06" && !content.startsWith("<!DOCTYPE html>") && content.includes("<!DOCTYPE html>")) {
+  } else if (fileId === "05" && !content.startsWith("<!DOCTYPE html>") && content.includes("<!DOCTYPE html>")) {
     const htmlStart = content.indexOf("<!DOCTYPE html>");
     content = content.slice(htmlStart).replace(/```html/g, "").replace(/```/g, "").trim();
   }
@@ -1567,17 +1508,6 @@ export async function tryGenerateWithMcp(
   // 在云端测试环境强制禁用 MCP，避免 npx 下载卡死
   if (process.env.DISABLE_MCP === "true") {
     return null;
-  }
-
-  // B1-4: MCP未连接时快速跳过
-  if (process.env.SKIP_MCP_ON_DISCONNECTED !== "false") {
-    const existing = JapMcpClient.getSharedClientInstance();
-    if (!existing || !existing.isConnected()) {
-      return null;
-    }
-    if (!(await existing.hasFileGenerationTools())) {
-      return null;
-    }
   }
 
   try {
@@ -1599,61 +1529,11 @@ export async function tryGenerateWithMcp(
   }
 }
 
-async function buildSddConstraintsLocally(snapshot: SddInputSnapshot): Promise<SddConstraints> {
-  const tableMap = parseTableColumns(snapshot.files["02"]);
-  const tables = Array.from(tableMap.entries()).map(([name, cols]) => ({
-    name,
-    primaryKey: "id", // 默认值
-    requiredColumns: Array.from(cols),
-    indexes: [],
-  }));
-
-  const apiSet = parseOpenApiSignatures(snapshot.files["04"]);
-  const apis = Array.from(apiSet).map((sig) => {
-    const [method, path] = sig.split(" ");
-    return {
-      method: method || "GET",
-      path: path || "/",
-      auth: "unknown" as const,
-      requiredRequestFields: [],
-      requiredResponseFields: [],
-      errorCodes: [],
-    };
-  });
-
-  const transitionKeys = parseStateTransitions(snapshot.files["03"]);
-  const states = new Set<string>();
-  const transitions = [];
-  for (const key of transitionKeys) {
-    const [from, to] = key.split("->");
-    if (from) states.add(from);
-    if (to) states.add(to);
-    transitions.push({ from: from || "", to: to || "", trigger: "", notes: "" });
-  }
-  const stateMachines = transitions.length > 0
-    ? [{ name: "default", states: Array.from(states), transitions }]
-    : [];
-
-  return {
-    version: "1",
-    generatedAt: new Date().toISOString(),
-    apis,
-    tables,
-    stateMachines,
-    notes: "auto-generated from local parsing",
-  };
-}
-
 async function generateSddConstraintsDraft(
   meta: FileRunMeta,
   snapshot: SddInputSnapshot,
   fallbackContextOnly: boolean,
 ): Promise<SddConstraints> {
-  // B5-1: 本地完全替代 Constraints LLM 提取
-  if (process.env.ENABLE_SDD_LOCAL_CONSTRAINTS === "true") {
-    return buildSddConstraintsLocally(snapshot);
-  }
-
   const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
   const structured = model.withStructuredOutput(SddConstraintsSchema, { method: "functionCalling" });
   
@@ -1724,14 +1604,12 @@ async function generateSddBodyWithConstraints(
   minimalist: boolean,
 ): Promise<string> {
   const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
-  const isLocalConstraints = process.env.ENABLE_SDD_LOCAL_CONSTRAINTS === "true";
-  
   const extraPrompt = minimalist
     ? "\nMINIMALIST MODE: keep concise sections only."
     : "";
   const prompt =
     [
-      buildSddPrompt(snapshot.requirement, snapshot.approvedSummary, isLocalConstraints ? "" : snapshot.evidence, snapshot.qa, snapshot.skill),
+      buildSddPrompt(snapshot.requirement, snapshot.approvedSummary, snapshot.evidence, snapshot.qa, snapshot.skill),
       "",
       "Constraint JSON (SSOT):",
       JSON.stringify(constraints),
@@ -1739,18 +1617,11 @@ async function generateSddBodyWithConstraints(
       "必须严格依据Constraint JSON生成SDD正文，正文不要与约束冲突。",
       "正文中不要再解释约束来源。",
     ].join("\n") + extraPrompt;
-    
-  let systemPromptText = SDD_NODE_SYSTEM_PROMPT + "\n\n只输出SDD正文markdown，不要代码块包裹，不要JSON，不要解释。";
-  if (isLocalConstraints) {
-    systemPromptText = SDD_NODE_SYSTEM_PROMPT +
-      `\n\n约束JSON已经提取完毕，你必须在SDD正文末尾原样包含以下约束块：\n` +
-      `<!-- SDD_CONSTRAINTS_JSON_BEGIN -->\n` +
-      JSON.stringify(constraints, null, 2) +
-      `\n<!-- SDD_CONSTRAINTS_JSON_END -->`;
-  }
-
   const response = await model.invoke([
-    new SystemMessage(systemPromptText),
+    new SystemMessage(
+      SDD_NODE_SYSTEM_PROMPT +
+        "\n\n只输出SDD正文markdown，不要代码块包裹，不要JSON，不要解释。",
+    ),
     new HumanMessage(prompt),
   ]);
   const text = typeof response.content === "string" ? response.content.trim() : "";
@@ -1774,110 +1645,70 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
   fallbackReason: string | null;
   sddDiagnostics?: SddGenerationDiagnostics;
 }> {
-  const approvedSummary = await loadSelectiveSummary(meta, fileId);
+  const approvedSummary = await loadApprovedArtifactSummary(meta);
   const isFallback = attempt >= 2;
   const isMinimalist = attempt === 3;
 
-  if (fileId === "08") {
+  if (fileId === "07") {
     // 增加前端进度提示
     await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
       logType: "INFO",
       title: "系统",
-      summary: "正在加载上下文快照...",
+      summary: "正在读取所有已生成的前置设计产物...",
     });
     emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
       logType: "INFO",
       title: "系统",
-      summary: "正在加载上下文快照...",
+      summary: "正在读取所有已生成的前置设计产物...",
     });
+    
+    // 我们不需要复杂的 SDD Snapshot 和 Constraints 提取逻辑，只需获取合并上下文
     const snapshot = await buildSddInputSnapshot(meta, approvedSummary, isFallback);
-
-    await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
-      logType: "INFO",
-      title: "系统",
-      summary: "正在分析前置产物，提取 SDD 硬性约束...",
-    });
-    emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
-      logType: "INFO",
-      title: "系统",
-      summary: "正在分析前置产物，提取 SDD 硬性约束...",
-    });
-
-    const constraints = await generateSddConstraintsDraft(meta, snapshot, isFallback);
-    const precheck = await runLocalSddPrecheck(snapshot, constraints);
-
-    let validation: SddGateValidation;
-    let payload: Record<string, unknown> = {};
-
-    // B5-2: precheck 通过时跳过 gate LLM调用
-    if (process.env.SKIP_GATE_ON_PRECHECK_PASS !== "false" && precheck.passed && precheck.conflicts.length === 0) {
-      await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
-        logType: "SUCCESS",
-        title: "系统",
-        summary: "架构预检通过，已跳过 LLM Gate 校验",
-      });
-      emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
-        logType: "SUCCESS",
-        title: "系统",
-        summary: "架构预检通过，已跳过 LLM Gate 校验",
-      });
-      validation = { passed: true, conflicts: [], meta: { skippedGate: true } };
-    } else {
-      await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
-        logType: "INFO",
-        title: "系统",
-        summary: "正在执行架构一致性预检与门禁校验...",
-      });
-      emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
-        logType: "INFO",
-        title: "系统",
-        summary: "正在执行架构一致性预检与门禁校验...",
-      });
-      
-      const gateResult = await validateSddGate(meta, snapshot, constraints, precheck);
-      validation = gateResult.validation;
-      payload = gateResult.payload;
-    }
-    
-    // 如果 Gate 校验未通过，将错误降级为 Warning，不抛出异常阻断生成
-    if (!validation.passed) {
-      const top = (validation.conflicts ?? []).slice(0, 3)
-        .map((item) => `${item.message}${item.location ? ` @${item.location}` : ""}`)
-        .join("；");
-      
-      // 记录一个专门的日志事件，提醒用户存在冲突
-      await appendEventLog(meta.workspacePath, meta.runId, "SDD_GATE_WARNING", {
-        fileId: "08",
-        message: `SDD Gate 校验存在冲突（已降级为警告继续生成）：${top || "存在一致性冲突"}`,
-      });
-
-      // 我们把 diagnostics 信息依然挂在局部变量里，以便后面的 catch 块或者 finally 块能落盘
-      // 但我们不 throw error 了
-    }
     
     await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
       logType: "INFO",
       title: "系统",
-      summary: "门禁校验完成，正在基于约束生成 SDD 正文...",
+      summary: "正在为您生成 Actionable Tasks (开发任务清单)...",
     });
     emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
       logType: "INFO",
       title: "系统",
-      summary: "门禁校验完成，正在基于约束生成 SDD 正文...",
+      summary: "正在为您生成 Actionable Tasks (开发任务清单)...",
     });
 
-    const markdown = await generateSddBodyWithConstraints(meta, snapshot, constraints, isFallback, isMinimalist);
+    const model = createModel(meta, 45000);
+    const prompt = [
+      "你是一个高级技术项目经理 (Technical Project Manager)。",
+      "你的任务是根据以下前置的架构设计文档，将其拆解为开发团队可以直接认领和执行的 `Actionable Tasks` 任务清单。",
+      "要求：",
+      "1. 任务颗粒度要细，必须是可以在 1-2 天内完成的独立 Task。",
+      "2. 任务必须分类，如：基础设施、数据库搭建、后端接口开发、前端页面开发、联调测试等。",
+      "3. 直接输出 Markdown 格式的清单，不要包含任何客套话。",
+      "4. 每个任务必须包含：任务名称、简要描述、验收标准。",
+      "",
+      "--- 前置设计文档 ---",
+      `需求草案：\n${snapshot.requirement}`,
+      `数据库设计：\n${snapshot.files["02"] || "无"}`,
+      `状态机设计：\n${snapshot.files["03"] || "无"}`,
+      `API 契约：\n${snapshot.files["04"] || "无"}`,
+      `前端结构：\n${snapshot.files["05"] || "无"}`,
+      `测试集合：\n${snapshot.files["06"] || "无"}`
+    ].join("\n");
+
+    const response = await model.invoke([
+      new HumanMessage(prompt),
+    ]);
+    
+    const text = typeof response.content === "string" ? response.content.trim() : "";
+    if (!text) {
+      throw new Error("任务清单正文为空");
+    }
+
     return {
-      content: appendConstraintsBlock(markdown, constraints),
+      content: text,
       usedMcp: false,
       toolName: null,
-      fallbackReason: isMinimalist ? "switched to minimalist mode" : (isFallback ? "switched to fallback context" : null),
-      sddDiagnostics: {
-        constraints,
-        precheck,
-        gateInput: payload,
-        gateResult: validation,
-      },
+      fallbackReason: null,
     };
   }
   
@@ -1954,85 +1785,116 @@ export async function withRunLock<T>(runId: string, fn: () => Promise<T>): Promi
   }
 }
 
-export async function filewiseGenerateDetailingBatch(meta: FileRunMeta): Promise<FileRunMeta> {
-  const detailingIds: FileId[] = ["05", "06", "07"];
+export async function filewiseGeneratePendingBaseFiles(meta: FileRunMeta): Promise<FileRunMeta> {
+  const allowed = new Set(meta.selectedModules && meta.selectedModules.length > 0 ? [...meta.selectedModules, "01", "07"] : ["01", "07"]);
+  const pendingFiles = meta.files.filter(f => f.fileId !== "07" && allowed.has(f.fileId) && (f.status === "PENDING" || f.status === "FAILED" || f.status === "REJECTED"));
   
-  // 更新三个文件的状态为 GENERATING
-  for (const fileId of detailingIds) {
-    upsertFileState(meta, fileId, { status: "GENERATING", lastError: null });
+  if (pendingFiles.length === 0) {
+    return meta;
+  }
+
+  // Set all to GENERATING first
+  for (const file of pendingFiles) {
+    upsertFileState(meta, file.fileId, { status: "GENERATING", lastError: null });
     emitTaskScopedEvent(meta.runId, "FILE_STAGE_CHANGED", {
       runId: meta.runId,
-      fileId,
+      fileId: file.fileId,
       status: "GENERATING",
     });
     emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
       logType: "INFO",
-      title: `文件 ${fileId} 开始并行生成`,
-      summary: `批量生成`,
+      title: `文件 ${file.fileId} 开始并发生成`,
+      summary: `第 ${file.retries + 1} 次尝试`,
     });
-    await appendEventLog(meta.workspacePath, meta.runId, "FILE_STAGE_CHANGED", { fileId, status: "GENERATING" });
+    await appendEventLog(meta.workspacePath, meta.runId, "FILE_STAGE_CHANGED", { fileId: file.fileId, status: "GENERATING" });
   }
   await saveMeta(meta);
 
-  // 并发生成
-  const results = await Promise.allSettled(
-    detailingIds.map(async (fileId) => {
+  // Run generation concurrently
+  const promises = pendingFiles.map(async (file) => {
+    let lastError: unknown = null;
+    let generated: any = null;
+    let finalAttempt = 0;
+    
+    for (const attempt of [1, 2, 3]) {
+      finalAttempt = attempt;
       try {
-        const result = await runSingleFileGeneration(meta, fileId, 1);
-        await writeFileBody(meta.workspacePath, meta.runId, fileId, result.content);
-        return { fileId, result, success: true };
-      } catch (error) {
-        return { fileId, error, success: false };
+        generated = await runSingleFileGeneration(meta, file.fileId, attempt);
+        await writeFileBody(meta.workspacePath, meta.runId, file.fileId, generated.content);
+        return { file, success: true, generated, attempt };
+      } catch (err) {
+        lastError = err;
+        const message = err instanceof Error ? err.message : String(err);
+        await appendEventLog(meta.workspacePath, meta.runId, "FILE_FAILED", { fileId: file.fileId, attempt, message });
+        emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+          logType: "ERROR",
+          title: `文件 ${file.fileId} 生成异常 (${attempt}/3)`,
+          summary: message,
+        });
       }
-    })
-  );
+    }
+    return { file, success: false, lastError, attempt: finalAttempt };
+  });
 
-  // 汇总结果并更新状态
-  for (const res of results) {
-    if (res.status === "fulfilled" && res.value.success) {
-      const { fileId, result } = res.value;
-      upsertFileState(meta, fileId, {
-        status: "GENERATED",
-        usedMcp: result?.usedMcp ?? false,
-        toolName: result?.toolName ?? null,
-        fallbackReason: result?.fallbackReason ?? null,
+  const results = await Promise.all(promises);
+
+  // Read meta again to get latest state in case of other concurrent reads (though we hold lock)
+  const freshMeta = await readMeta(meta.workspacePath, meta.runId);
+
+  for (const result of results) {
+    const fileId = result.file.fileId;
+    if (result.success && result.generated) {
+      const nextStatus: FileRunStatus = "GENERATED";
+      upsertFileState(freshMeta, fileId, {
+        status: nextStatus,
+        retries: result.file.retries + result.attempt,
+        usedMcp: result.generated.usedMcp,
+        toolName: result.generated.toolName,
+        fallbackReason: result.generated.fallbackReason,
         lastError: null,
       });
-      emitTaskScopedEvent(meta.runId, "FILE_STAGE_CHANGED", {
-        runId: meta.runId,
+      emitTaskScopedEvent(freshMeta.runId, "FILE_GENERATED", {
+        runId: freshMeta.runId,
         fileId,
-        status: "GENERATED",
+        status: nextStatus,
       });
-      emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+      emitTaskScopedEvent(freshMeta.runId, "LOG_ADDED", {
         logType: "SUCCESS",
-        title: `文件 ${fileId} 生成完成`,
-        summary: `批量生成完成`,
+        title: `文件 ${fileId} 生成成功`,
+        summary: result.generated.fallbackReason
+          ? `fallback=${result.generated.fallbackReason}`
+          : result.generated.usedMcp
+            ? `usedMcp=${result.generated.toolName || "unknown"}`
+            : "使用内置模型生成",
       });
-      await appendEventLog(meta.workspacePath, meta.runId, "FILE_STAGE_CHANGED", { fileId, status: "GENERATED" });
-    } else if (res.status === "fulfilled" && !res.value.success) {
-      const { fileId, error } = res.value;
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      upsertFileState(meta, fileId, {
+      await appendEventLog(freshMeta.workspacePath, freshMeta.runId, "FILE_GENERATED", {
+        fileId,
+        status: nextStatus,
+      });
+    } else {
+      const message = result.lastError instanceof Error ? result.lastError.message : String(result.lastError);
+      upsertFileState(freshMeta, fileId, {
         status: "FAILED",
-        lastError: errorMsg,
+        retries: result.file.retries + result.attempt,
+        lastError: message,
       });
-      emitTaskScopedEvent(meta.runId, "FILE_STAGE_CHANGED", {
-        runId: meta.runId,
+      emitTaskScopedEvent(freshMeta.runId, "FILE_STAGE_CHANGED", {
+        runId: freshMeta.runId,
         fileId,
         status: "FAILED",
+        attempt: result.attempt,
+        error: message,
       });
-      emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
+      emitTaskScopedEvent(freshMeta.runId, "LOG_ADDED", {
         logType: "ERROR",
-        title: `文件 ${fileId} 生成失败`,
-        summary: errorMsg,
+        title: `文件 ${fileId} 生成最终失败`,
+        summary: message,
       });
-      await appendEventLog(meta.workspacePath, meta.runId, "FILE_STAGE_CHANGED", { fileId, status: "FAILED" });
     }
   }
 
-  // batch 完成后，不需要改变 currentFile（如果全部完成，前端会自动进入 review 或进入 08，或者保持在 05 等待手动 approve）
-  await saveMeta(meta);
-  return meta;
+  await saveMeta(freshMeta);
+  return freshMeta;
 }
 
 export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRunMeta> {
@@ -2064,7 +1926,7 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
   for (const attempt of [1, 2, 3]) {
     try {
       const generated = await runSingleFileGeneration(meta, fileId, attempt);
-      if (fileId === "08") {
+      if (fileId === "07") {
         await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
@@ -2077,68 +1939,20 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
         });
       }
       await writeFileBody(meta.workspacePath, meta.runId, fileId, generated.content);
-      if (fileId === "08") {
-        if (!generated.sddDiagnostics) {
-          throw new Error("SDD诊断信息缺失");
-        }
-        lastSddDiagnostics = generated.sddDiagnostics;
-        await writeJson(getSddConstraintsPath(meta.workspacePath, meta.runId), generated.sddDiagnostics.constraints);
-        await appendEventLog(meta.workspacePath, meta.runId, "SDD_CONSTRAINTS_EXTRACTED", {
-          fileId,
-          version: generated.sddDiagnostics.constraints.version,
-          apis: generated.sddDiagnostics.constraints.apis.length,
-          tables: generated.sddDiagnostics.constraints.tables.length,
-          stateMachines: generated.sddDiagnostics.constraints.stateMachines.length,
-        });
-        await writeJson(getSddValidationPath(meta.workspacePath, meta.runId), generated.sddDiagnostics.gateResult);
-        await appendEventLog(meta.workspacePath, meta.runId, "SDD_GATE_VALIDATED", {
-          fileId,
-          passed: generated.sddDiagnostics.gateResult.passed,
-          conflicts: (generated.sddDiagnostics.gateResult.conflicts ?? []).length,
-        });
+      if (fileId === "07") {
+        // SDD Diagnostics/Gate logic has been completely removed in the new 07 Actionable Tasks workflow
+        // to embrace the lightweight and streamlined philosophy.
+        
         await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
-          summary: "SDD 诊断结果已写入，准备提交08状态...",
+          summary: "开发任务清单生成完毕，准备提交...",
         });
         emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
-          summary: "SDD 诊断结果已写入，准备提交08状态...",
+          summary: "开发任务清单生成完毕，准备提交...",
         });
-      }
-
-      // B4: 04 生成后做 API 一致性快检
-      if (fileId === "04" && process.env.ENABLE_QUICK_CHECK === "true") {
-        const snapshot = await buildSddInputSnapshot(meta, await loadApprovedArtifactSummary(meta), false);
-        const dummyConstraints = await buildSddConstraintsLocally(snapshot);
-        const quickCheck = await runLocalSddPrecheck(snapshot, dummyConstraints);
-        
-        const errors = quickCheck.conflicts.filter(c => c.severity === "error");
-        const warnings = quickCheck.conflicts.filter(c => c.severity === "warning");
-        
-        if (warnings.length > 0) {
-          await appendEventLog(meta.workspacePath, meta.runId, "QUICK_CHECK_WARNING", {
-            fileId: "04",
-            warnings: warnings.slice(0, 5),
-          });
-          emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
-            logType: "INFO",
-            title: `一致性快检警告 (04)`,
-            summary: `发现 ${warnings.length} 个警告`,
-          });
-        }
-        if (errors.length > 0) {
-          await appendEventLog(meta.workspacePath, meta.runId, "QUICK_CHECK_ERROR", {
-            fileId: "04",
-            errors: errors.slice(0, 5),
-          });
-          emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
-            logType: "ERROR",
-            title: `一致性快检错误 (04)`,
-            summary: `发现 ${errors.length} 个冲突错误，可能需要返工`,
-          });
-        }
       }
 
       const nextStatus: FileRunStatus = "GENERATED";
@@ -2175,28 +1989,9 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
       return meta;
     } catch (error) {
       lastError = error;
-      const sddDiagnostics = (error as { sddDiagnostics?: SddGenerationDiagnostics }).sddDiagnostics ?? null;
-      if (fileId === "08" && sddDiagnostics) {
-        lastSddDiagnostics = sddDiagnostics;
-        await writeJson(getSddPrecheckPath(meta.workspacePath, meta.runId), sddDiagnostics.precheck);
-        await writeJson(getSddGateInputPath(meta.workspacePath, meta.runId), sddDiagnostics.gateInput);
-        await writeJson(getSddGateResultPath(meta.workspacePath, meta.runId), sddDiagnostics.gateResult);
-        const top3 = (sddDiagnostics.gateResult.conflicts ?? [])
-          .slice(0, 3)
-          .map((item) => `${item.message}${item.location ? ` @${item.location}` : ""}`)
-          .join("；");
-        const suggested = (sddDiagnostics.gateResult.conflicts ?? [])
-          .slice(0, 3)
-          .map((item) => item.suggestion)
-          .filter(Boolean)
-          .join("；");
-        await appendEventLog(meta.workspacePath, meta.runId, "SDD_FAILURE_SUMMARY", {
-          fileId,
-          top3: top3 || "无",
-          suggestion: suggested || "请先修正01-07后重试",
-        });
-      } else if (fileId === "08") {
-        const message = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+      
+      if (fileId === "07") {
         const lowered = message.toLowerCase();
         const networkLike =
           lowered.includes("connection error") ||
@@ -2206,13 +2001,12 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
           lowered.includes("socket hang up");
         await appendEventLog(meta.workspacePath, meta.runId, "SDD_FAILURE_SUMMARY", {
           fileId,
-          top3: message || "SDD生成失败",
+          top3: message || "任务清单生成失败",
           suggestion: networkLike
             ? "检查LLM baseUrl/apiKey与网络连通性后重试"
             : "查看FILE_FAILED与LLM响应详情后重试",
         });
       }
-      const message = error instanceof Error ? error.message : String(error);
       upsertFileState(meta, fileId, {
         status: "FAILED",
         retries: retryBase + attempt,
@@ -2251,6 +2045,7 @@ export async function createFilewiseRun(params: {
   workspace: unknown;
   questionnaire: JapState["questionnaire"];
   userAnswers: Record<string, string | string[]>;
+  selectedModules?: string[];
 }): Promise<FileRunMeta> {
   const workspacePath = resolveWorkspacePath(params.workspace);
   const taskRoot = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks"));
@@ -2274,10 +2069,13 @@ export async function createFilewiseRun(params: {
     llm,
     workspacePath,
     status: "RUNNING",
-    files: createInitialFileStates(),
+    files: createInitialFileStates(params.selectedModules),
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
+  if (params.selectedModules) {
+    meta.selectedModules = params.selectedModules;
+  }
   await saveMeta(meta);
   await appendEventLog(workspacePath, runId, "RUN_CREATED", {
     stage: meta.stage,
