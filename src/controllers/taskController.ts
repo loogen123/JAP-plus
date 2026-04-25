@@ -22,8 +22,6 @@ import {
   saveMeta,
   appendEventLog,
   writeFileBody,
-  readSddConstraints,
-  readSddGateValidation,
   listSddSourceRuns,
   readRunEventsTail,
   getRunLastEventAt,
@@ -35,20 +33,20 @@ import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages
 
 export class TaskController {
   private inferSddErrorCode(message: string): string {
-    const text = message.toLowerCase();
-    if (text.includes("connection error") || text.includes("econn") || text.includes("socket hang up")) {
-      return "SDD_LLM_CONNECTION_ERROR";
+    const lowered = message.toLowerCase();
+    if (lowered.includes("econnrefused") || lowered.includes("socket hang up") || lowered.includes("timeout")) {
+      return "TASKS_LLM_CONNECTION_ERROR";
     }
-    if (text.includes("timeout") || text.includes("timed out")) {
-      return "SDD_LLM_TIMEOUT";
+    if (lowered.includes("timeout") || lowered.includes("aborted")) {
+      return "TASKS_LLM_TIMEOUT";
     }
-    if (text.includes("unauthorized") || text.includes("invalid api key") || text.includes("401")) {
-      return "SDD_LLM_AUTH_ERROR";
+    if (lowered.includes("401") || lowered.includes("unauthorized") || lowered.includes("api key")) {
+      return "TASKS_LLM_AUTH_ERROR";
     }
-    if (text.includes("rate limit") || text.includes("429")) {
-      return "SDD_LLM_RATE_LIMIT";
+    if (lowered.includes("429") || lowered.includes("rate limit") || lowered.includes("quota")) {
+      return "TASKS_LLM_RATE_LIMIT";
     }
-    return "SDD_GENERATION_FAILED";
+    return "TASKS_GENERATION_FAILED";
   }
 
   private async buildSddErrorPayload(
@@ -262,14 +260,8 @@ export class TaskController {
       const currentBody = (includeContent && runtime.currentFile)
         ? await readFileBody(workspacePath, runId, runtime.currentFile)
         : undefined;
-      const sddConstraints = await readSddConstraints(workspacePath, runId);
-      const sddValidation = await readSddGateValidation(workspacePath, runId);
       const responseObj: any = {
         ...toFileStatusResponse(meta, workspacePath),
-        sdd: {
-          constraints: sddConstraints,
-          validation: sddValidation,
-        },
       };
       if (currentBody !== undefined) {
         responseObj.currentFileContent = currentBody;
@@ -412,6 +404,9 @@ export class TaskController {
     try {
       await withRunLock(runId, async () => {
         const meta = await readMeta(workspacePath, runId);
+        if (req.body.llm && req.body.llm.apiKey) {
+          meta.llm = { ...meta.llm, ...req.body.llm };
+        }
         const runtime = getFileRuntimeRecord(meta);
         if (!runtime.actions.canGenerateNext || !meta.currentFile) {
           res.status(409).json({ message: "no file is ready for generation", ...toFileStatusResponse(meta, workspacePath) });
@@ -437,6 +432,9 @@ export class TaskController {
     try {
       await withRunLock(runId, async () => {
         const meta = await readMeta(workspacePath, runId);
+        if (req.body.llm && req.body.llm.apiKey) {
+          meta.llm = { ...meta.llm, ...req.body.llm };
+        }
         const runtime = getFileRuntimeRecord(meta);
         if (!runtime.actions.canGenerateNext || !meta.currentFile) {
           res.status(409).json({ message: "no file is ready for generation", ...toFileStatusResponse(meta, workspacePath) });
@@ -473,6 +471,10 @@ export class TaskController {
       const targetRunId = sourceRunId || runId;
       await withRunLock(targetRunId, async () => {
         let meta = await readMeta(workspacePath, targetRunId);
+        if (req.body.llm && req.body.llm.apiKey) {
+          meta.llm = { ...meta.llm, ...req.body.llm };
+        }
+        
         if (sourceRunId) {
           const baseFiles = meta.files.filter(f => f.fileId !== "07");
           const baseReady = baseFiles.every((file) => {
@@ -517,7 +519,7 @@ export class TaskController {
           return;
         }
         if (!runtime.actions.canGenerateNext) {
-          res.status(409).json({ message: "file 08 is not ready for generation", ...toFileStatusResponse(meta, workspacePath) });
+          res.status(409).json({ message: "file 07 is not ready for generation", ...toFileStatusResponse(meta, workspacePath) });
           return;
         }
         await filewiseGenerateCurrent(meta);
@@ -588,7 +590,7 @@ export class TaskController {
     if (!sourceRunId) {
       res.status(400).json({
         message: "sourceRunId is required",
-        errorCode: "SDD_SOURCE_RUN_ID_REQUIRED",
+        errorCode: "TASKS_SOURCE_RUN_ID_REQUIRED",
         stage: "DETAILING",
         lastEventAt: null,
       });
@@ -607,7 +609,7 @@ export class TaskController {
             sourceRunId,
             "DETAILING",
             "历史任务未完成基础设计阶段审核通过，不能用于SDD生成",
-            "SDD_SOURCE_NOT_READY",
+            "TASKS_SOURCE_NOT_READY",
           );
           res.status(409).json(payload);
           return;
@@ -666,7 +668,7 @@ export class TaskController {
           }
 
           await appendEventLog(workspacePath, sourceRunId, "FILE_APPROVED", { fileId: "07", auto: true });
-          await appendEventLog(workspacePath, sourceRunId, "LOG_ADDED", { logType: "INFO", title: "系统", summary: "08 文件已生成并通过自动审核" });
+          await appendEventLog(workspacePath, sourceRunId, "LOG_ADDED", { logType: "INFO", title: "系统", summary: "07 文件已生成并通过自动审核" });
         }
       });
       const finalRefreshed = await readMeta(workspacePath, sourceRunId);
@@ -684,7 +686,7 @@ export class TaskController {
         sourceRunId,
         "DETAILING",
         message,
-        "SDD_GENERATION_FAILED",
+        "TASKS_GENERATION_FAILED",
       );
       res.status(500).json(payload);
     }
@@ -772,6 +774,9 @@ export class TaskController {
       let generatedMeta;
       await withRunLock(runId, async () => {
         const meta = await readMeta(workspacePath, runId);
+        if (req.body.llm && req.body.llm.apiKey) {
+          meta.llm = { ...meta.llm, ...req.body.llm };
+        }
         const current = meta.files.find((item) => item.fileId === fileId);
         
         // For files 02-07 (which are generated concurrently), we don't enforce currentFile strict match

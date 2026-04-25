@@ -11,10 +11,10 @@ import { ARTIFACT_FILES } from "../constants/domainConstants.js";
 
 import {
   DETAILING_NODE_SYSTEM_PROMPT,
+  ELICITATION_NODE_SYSTEM_PROMPT,
   MODELING_NODE_SYSTEM_PROMPT,
   REVIEW_NODE_SYSTEM_PROMPT,
-  SDD_GATE_SYSTEM_PROMPT,
-  SDD_NODE_SYSTEM_PROMPT,
+  TASKS_NODE_SYSTEM_PROMPT,
 } from "../constants/promptTexts.js";
 import {
   emitLogAdded,
@@ -25,8 +25,6 @@ import {
   QuestionnaireSchema,
   type JapState,
 } from "../state/japState.js";
-import { SddConstraintsSchema, type SddConstraints } from "../state/sddConstraints.js";
-import { SddGateValidationSchema, type SddGateValidation } from "../state/sddGate.js";
 import { invokeStructuredWithJsonFallback } from "./structuredOutputFallback.js";
 import { JapMcpClient } from "../tools/mcpClient.js";
 
@@ -386,7 +384,7 @@ export type FileRunStatus = "PENDING" | "GENERATING" | "GENERATED" | "REVIEWING"
 export type FileRunStage = "MODELING" | "REVIEW" | "DETAILING" | "DONE";
 export type FileRunMode = "legacy" | "filewise";
 
-const FILEWISE_STATUS_ORDER = ["01", "02", "03", "04", "05", "05", "06", "07"] as const;
+const FILEWISE_STATUS_ORDER = ["01", "02", "03", "04", "05", "06", "07"] as const;
 export type FileId = (typeof FILEWISE_STATUS_ORDER)[number];
 export type ArtifactFileId = FileId;
 
@@ -434,7 +432,55 @@ export type FileRunFileState = {
   updatedAt: string;
 };
 
-export type FileRunMeta = {
+import yaml from 'js-yaml';
+
+export async function validateApiConsistency(meta: FileRunMeta, fileId: string, content: string): Promise<void> {
+  if (fileId !== "01" && fileId !== "06") return;
+
+  const runPaths = getRunPaths(meta.workspacePath, meta.runId);
+  const file04Path = path.join(runPaths.runDir, "04_RESTful_API契约.yaml");
+  let yamlContent = "";
+  try {
+    yamlContent = await fs.readFile(file04Path, "utf-8");
+  } catch(e) {
+    return; // 04 not generated yet, skip
+  }
+
+  let paths04 = new Set<string>();
+  try {
+    const parsed04 = yaml.load(yamlContent) as any;
+    if (parsed04 && parsed04.paths) {
+      for (const p of Object.keys(parsed04.paths)) {
+        for (const m of Object.keys(parsed04.paths[p])) {
+          paths04.add(`${m.toUpperCase()} ${p}`);
+        }
+      }
+    }
+  } catch(e) {
+    // ignore
+  }
+
+  const regex = /(GET|POST|PUT|DELETE|PATCH)\s+(\/[a-zA-Z0-9_\-\/\{\}]+)/ig;
+  let match;
+  let missing = [];
+  while ((match = regex.exec(content)) !== null) {
+    if (!match || !match[1] || !match[2]) continue;
+    const api = `${match[1].toUpperCase()} ${match[2]}`;
+    if (!paths04.has(api)) {
+      missing.push(api);
+    }
+  }
+
+  if (missing.length > 0) {
+    await appendEventLog(meta.workspacePath, meta.runId, "API_CONSISTENCY_FAILED", {
+      fileId,
+      message: `发现 04 中未定义的 API: ${missing.join(", ")}`,
+    });
+    throw new Error(`API一致性校验失败: 发现 04 中未定义的 API: ${missing.join(", ")}`);
+  }
+}
+
+type FileRunMeta = {
   runId: string;
   workflowMode: FileRunMode;
   stage: FileRunStage;
@@ -582,7 +628,7 @@ export async function importBaseFilesFromRun(meta: FileRunMeta, sourceRunId: str
   }
   upsertFileState(meta, "07", { status: "PENDING", lastError: null });
   await saveMeta(meta);
-  await appendEventLog(meta.workspacePath, meta.runId, "SDD_SOURCE_IMPORTED", {
+  await appendEventLog(meta.workspacePath, meta.runId, "TASKS_SOURCE_IMPORTED", {
     sourceRunId,
     targetRunId: meta.runId,
   });
@@ -663,7 +709,7 @@ export function deriveStageFromCurrentFile(fileId: FileId | null): FileRunStage 
   if (!fileId) {
     return "DONE";
   }
-  return ["05", "05", "06", "07"].includes(fileId) ? "DETAILING" : "MODELING";
+  return ["05", "06", "07"].includes(fileId as string) ? "DETAILING" : "MODELING";
 }
 
 export function resolveCurrentFile(files: FileRunFileState[]): FileId | null {
@@ -868,7 +914,12 @@ export async function saveMeta(meta: FileRunMeta): Promise<void> {
     meta.status = "DONE";
   }
   meta.updatedAt = nowIso();
-  await writeJson(paths.metaPath, meta);
+  
+  const metaToSave = JSON.parse(JSON.stringify(meta));
+  if (metaToSave.llm && metaToSave.llm.apiKey) {
+    metaToSave.llm.apiKey = "***";
+  }
+  await writeJson(paths.metaPath, metaToSave);
 }
 
 export async function writeFileBody(
@@ -970,9 +1021,9 @@ export function buildDetailingPrompt(fileId: ArtifactFileId, requirement: string
     approvedSummary || "(none)",
     "",
     "Constraints:",
-    "05 must be Gherkin acceptance tests.",
-    "06 must be complete single-file HTML.",
-    "07 must be valid Postman Collection 2.1 JSON.",
+    "05 must be complete single-file HTML UI prototypes.",
+    "06 must be valid Postman Collection 2.1 JSON or similar generic API debugging collection.",
+    "API definitions in 06 MUST strictly derive from 04_RESTful_API契约.yaml.",
     "",
     "Skill context:",
     clampText(skill, 1800),
@@ -1001,7 +1052,8 @@ export function buildSddPrompt(requirement: string, approvedSummary: string, evi
     "Group tasks logically (e.g. `## 1. Database & Models`, `## 2. API Implementation`, `## 3. Frontend Components`).",
     "Include specific file paths and function signatures where applicable.",
     "Keep all entity/API/table/state naming consistent with intermediate artifacts.",
-    "You MUST include the appendix JSON constraint block wrapped by markers: <!-- SDD_CONSTRAINTS_JSON_BEGIN --> and <!-- SDD_CONSTRAINTS_JSON_END -->.",
+    "5. **绝对禁止** 在开头或结尾输出任何寒暄、对话语（如“好的，作为任务编排器...”）。必须直接以第一行 Markdown 标题 `## ` 开头输出内容。",
+    "6. **接口级验收强制约束**：在 Backend APIs 任务分类下，每个接口的实现任务之后，必须紧跟具体的验收子任务。验收子任务必须明确指明：(a) 必填的请求/响应核心字段；(b) 特殊的错误码（如 401、403、429 等）及触发场景；(c) 鉴权失败或越权访问的具体边界行为。",
     "",
     "Skill context:",
     clampText(skill, 2500),
@@ -1009,375 +1061,6 @@ export function buildSddPrompt(requirement: string, approvedSummary: string, evi
 }
 
 
-
-export function extractSddConstraintsFromMarkdown(markdown: string): SddConstraints {
-  const markerMatch = markdown.match(
-    /<!--\s*SDD_CONSTRAINTS_JSON_BEGIN\s*-->([\s\S]*?)<!--\s*SDD_CONSTRAINTS_JSON_END\s*-->/i,
-  );
-  if (!markerMatch) {
-    throw new Error("SDD constraints JSON block markers not found");
-  }
-  let jsonText = markerMatch[1]?.trim() ?? "";
-  jsonText = jsonText.replace(/^```[a-zA-Z]*\s*/, "").replace(/\s*```$/, "").trim();
-  if (!jsonText) {
-    throw new Error("SDD constraints JSON block is empty");
-  }
-  const parsed = JSON.parse(jsonText) as unknown;
-  return SddConstraintsSchema.parse(parsed);
-}
-
-async function recoverSddConstraintsByLlm(
-  meta: FileRunMeta,
-  markdown: string,
-  parseError: unknown,
-): Promise<SddConstraints> {
-  const model = createModel(meta, 45000);
-  const structured = model.withStructuredOutput(SddConstraintsSchema, { method: "functionCalling" });
-  const payload = {
-    parseError: parseError instanceof Error ? parseError.message : String(parseError),
-    markdown: clampText(markdown, 26000),
-  };
-  const { result } = await invokeStructuredWithJsonFallback<SddConstraints>({
-    invokeStructured: async () =>
-      SddConstraintsSchema.parse(
-        await structured.invoke([
-          new SystemMessage(
-            "从给定的SDD markdown中提取并重建约束JSON。只返回符合schema的结构化结果，不要解释。",
-          ),
-          new HumanMessage(JSON.stringify(payload)),
-        ]),
-      ),
-    invokeFallback: () =>
-      model.invoke([
-        new SystemMessage(
-          "从给定的SDD markdown中提取并重建约束JSON。返回纯JSON对象，字段必须包含version/apis/tables/stateMachines。",
-        ),
-        new HumanMessage(JSON.stringify(payload)),
-      ]),
-    safeParse: (value) => SddConstraintsSchema.safeParse(value),
-  });
-  return SddConstraintsSchema.parse(result);
-}
-
-function getSddConstraintsPath(workspacePath: string, runId: string): string {
-  const paths = getRunPaths(workspacePath, runId);
-  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.constraints.json"));
-}
-
-function getSddValidationPath(workspacePath: string, runId: string): string {
-  const paths = getRunPaths(workspacePath, runId);
-  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.validation.json"));
-}
-
-function getSddPrecheckPath(workspacePath: string, runId: string): string {
-  const paths = getRunPaths(workspacePath, runId);
-  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.precheck.json"));
-}
-
-function getSddGateInputPath(workspacePath: string, runId: string): string {
-  const paths = getRunPaths(workspacePath, runId);
-  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.gate.input.json"));
-}
-
-function getSddGateResultPath(workspacePath: string, runId: string): string {
-  const paths = getRunPaths(workspacePath, runId);
-  return ensureInsideWorkspace(paths.runDir, path.join(paths.runDir, "sdd.gate.result.json"));
-}
-
-export async function readSddGateValidation(workspacePath: string, runId: string): Promise<SddGateValidation | null> {
-  try {
-    const raw = await fs.readFile(getSddValidationPath(workspacePath, runId), "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    const validated = SddGateValidationSchema.safeParse(parsed);
-    if (!validated.success) {
-      return null;
-    }
-    return validated.data;
-  } catch {
-    return null;
-  }
-}
-
-export async function readSddConstraints(workspacePath: string, runId: string): Promise<SddConstraints | null> {
-  try {
-    const raw = await fs.readFile(getSddConstraintsPath(workspacePath, runId), "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    const validated = SddConstraintsSchema.safeParse(parsed);
-    if (!validated.success) {
-      return null;
-    }
-    return validated.data;
-  } catch {
-    return null;
-  }
-}
-
-type SddPrecheckResult = {
-  passed: boolean;
-  conflicts: Array<{
-    category: "api" | "data" | "state" | "other";
-    severity: "error" | "warning";
-    message: string;
-    location: string;
-    evidence?: string;
-    suggestion?: string;
-  }>;
-  normalized: {
-    apiKeys: string[];
-    tableKeys: string[];
-    transitionKeys: string[];
-  };
-};
-
-function normalizeWord(value: string): string {
-  const plain = value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
-  if (!plain) return plain;
-  if (plain.endsWith("ies") && plain.length > 3) return `${plain.slice(0, -3)}y`;
-  if (plain.endsWith("es") && plain.length > 2) return plain.slice(0, -2);
-  if (plain.endsWith("s") && plain.length > 1) return plain.slice(0, -1);
-  return plain;
-}
-
-function normalizeApiPath(rawPath: string): string {
-  const clean = rawPath.trim().replace(/\/+/g, "/").replace(/\/+$/g, "");
-  const segs = clean
-    .split("/")
-    .filter(Boolean)
-    .map((seg) => {
-      if (/^\{[^}]+\}$/.test(seg)) return "{id}";
-      return normalizeWord(seg);
-    });
-  return `/${segs.join("/") || ""}`;
-}
-
-function parseOpenApiSignatures(openapi: string): Set<string> {
-  const lines = openapi.split(/\r?\n/);
-  let currentPath = "";
-  const out = new Set<string>();
-  for (const line of lines) {
-    // 匹配 YAML 中的路径，允许前面有缩进，允许根路径 "/"
-    const pathMatch = line.match(/^\s*\/([^\s:]*)\s*:\s*$/);
-    if (pathMatch) {
-      currentPath = `/${pathMatch[1] ?? ""}`;
-      continue;
-    }
-    const methodMatch = line.match(/^\s{2,}(get|post|put|patch|delete)\s*:\s*$/i);
-    if (methodMatch && currentPath) {
-      const method = methodMatch[1]?.toUpperCase() ?? "GET";
-      out.add(`${method} ${normalizeApiPath(currentPath)}`);
-    }
-  }
-  return out;
-}
-
-function parseTableColumns(domain: string): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>();
-  const createTable = /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:`?[a-zA-Z0-9_]+`?\.)?`?([a-zA-Z0-9_]+)`?\s*\(([\s\S]*?)\)/gi;
-  for (const match of domain.matchAll(createTable)) {
-    const table = normalizeWord(match[1] ?? "");
-    if (!table) continue;
-    const body = match[2] ?? "";
-    const cols = new Set<string>();
-    body.split(/\r?\n/).forEach((line) => {
-      const colMatch = line.trim().match(/^`?([a-zA-Z0-9_]+)`?\s+[a-zA-Z]/);
-      if (!colMatch) return;
-      const col = normalizeWord(colMatch[1] ?? "");
-      if (col && !["primary", "unique", "key", "index", "constraint", "foreign"].includes(col)) {
-        cols.add(col);
-      }
-    });
-    out.set(table, cols);
-  }
-  return out;
-}
-
-function parseStateTransitions(content: string): Set<string> {
-  const out = new Set<string>();
-  const edgeRegex = /([A-Za-z0-9_]+)\s*--?>\s*([A-Za-z0-9_]+)/g;
-  for (const match of content.matchAll(edgeRegex)) {
-    const from = normalizeWord(match[1] ?? "");
-    const to = normalizeWord(match[2] ?? "");
-    if (from && to) out.add(`${from}->${to}`);
-  }
-  return out;
-}
-
-async function runLocalSddPrecheck(snapshot: SddInputSnapshot, constraints: SddConstraints): Promise<SddPrecheckResult> {
-  const openapi = snapshot.files["04"];
-  const domain = snapshot.files["02"];
-  const stateMachine = snapshot.files["03"];
-  const openapiKeys = parseOpenApiSignatures(openapi);
-  const tableMap = parseTableColumns(domain);
-  const transitionKeys = parseStateTransitions(stateMachine);
-  const conflicts: SddPrecheckResult["conflicts"] = [];
-
-  for (const api of constraints.apis) {
-    const method = String(api.method ?? "").toUpperCase();
-    const key = `${method} ${normalizeApiPath(String(api.path ?? ""))}`;
-    if (!openapiKeys.has(key)) {
-      conflicts.push({
-        category: "api",
-        severity: "error",
-        message: `API未命中：${method} ${api.path}`,
-        location: "04_api_contract.yaml",
-        evidence: key,
-        suggestion: "对齐04中的path和method（大小写/尾斜杠/参数占位符已归一化）",
-      });
-    }
-  }
-
-  for (const table of constraints.tables) {
-    const tableKey = normalizeWord(table.name);
-    const columns = tableMap.get(tableKey);
-    if (!columns) {
-      conflicts.push({
-        category: "data",
-        severity: "error",
-        message: `数据表未命中：${table.name}`,
-        location: "02_domain_model.md",
-        evidence: tableKey,
-        suggestion: "对齐02中的表名（已做单复数/大小写归一化）",
-      });
-      continue;
-    }
-    for (const col of table.requiredColumns ?? []) {
-      const colKey = normalizeWord(col);
-      if (!columns.has(colKey)) {
-        conflicts.push({
-          category: "data",
-          severity: "warning",
-          message: `字段未命中：${table.name}.${col}`,
-          location: "02_domain_model.md",
-          evidence: `${tableKey}.${colKey}`,
-          suggestion: "补充字段或在约束中移除该字段",
-        });
-      }
-    }
-  }
-
-  for (const sm of constraints.stateMachines) {
-    for (const tr of sm.transitions ?? []) {
-      const key = `${normalizeWord(tr.from)}->${normalizeWord(tr.to)}`;
-      if (!transitionKeys.has(key)) {
-        conflicts.push({
-          category: "state",
-          severity: "error",
-          message: `状态流转未命中：${sm.name} ${tr.from}->${tr.to}`,
-          location: "03_state_machine.md",
-          evidence: key,
-          suggestion: "对齐03中的状态节点与流转边",
-        });
-      }
-    }
-  }
-
-  return {
-    passed: !conflicts.some((item) => item.severity === "error"),
-    conflicts,
-    normalized: {
-      apiKeys: [...openapiKeys],
-      tableKeys: [...tableMap.keys()],
-      transitionKeys: [...transitionKeys],
-    },
-  };
-}
-
-async function validateSddGate(
-  meta: FileRunMeta,
-  snapshot: SddInputSnapshot,
-  constraints: SddConstraints,
-  precheck: SddPrecheckResult,
-): Promise<{ validation: SddGateValidation; payload: Record<string, unknown> }> {
-  const openapi = snapshot.files["04"];
-  const domain = snapshot.files["02"];
-  const stateMachine = snapshot.files["03"];
-  const model = createModel(meta, 45000);
-  const structured = model.withStructuredOutput(SddGateValidationSchema, { method: "functionCalling" });
-
-  const payload = {
-    constraints,
-    precheck,
-    artifacts: {
-      openapi: clampText(openapi, 22000),
-      domainModel: clampText(domain, 22000),
-      stateMachine: clampText(stateMachine, 22000),
-    },
-  };
-
-  const { result, usedFallback } = await invokeStructuredWithJsonFallback<SddGateValidation>({
-    invokeStructured: () =>
-      structured.invoke([
-        new SystemMessage(SDD_GATE_SYSTEM_PROMPT),
-        new HumanMessage(JSON.stringify(payload)),
-      ]),
-    invokeFallback: () =>
-      model.invoke([
-        new SystemMessage(SDD_GATE_SYSTEM_PROMPT),
-        new HumanMessage(JSON.stringify(payload)),
-      ]),
-    safeParse: (value) => SddGateValidationSchema.safeParse(value),
-  });
-
-  const normalized = SddGateValidationSchema.parse(result);
-  const conflicts = (normalized.conflicts ?? []).map((conflict) => ({
-    category: conflict.category ?? "other",
-    severity: conflict.severity ?? "error",
-    message: conflict.message,
-    location: conflict.location,
-    evidence: conflict.evidence,
-    suggestion: conflict.suggestion,
-  }));
-  const mergedConflicts = [
-    ...precheck.conflicts.map((conflict) => ({
-      category: conflict.category,
-      severity: conflict.severity,
-      message: conflict.message,
-      location: conflict.location,
-      evidence: conflict.evidence,
-      suggestion: conflict.suggestion,
-    })),
-    ...conflicts,
-  ];
-  const hasErrorConflict = mergedConflicts.some((conflict) => conflict.severity === "error");
-  const validation: SddGateValidation = {
-    ...normalized,
-    passed: normalized.passed && !hasErrorConflict,
-    conflicts: mergedConflicts,
-    meta: {
-      ...(normalized.meta ?? {}),
-      usedFallback,
-    },
-  };
-  return { validation, payload };
-}
-
-async function loadSddEvidence(meta: FileRunMeta): Promise<string> {
-  // SDD 作为最终交付物，需要尽可能基于 01~07 的实际产物做一致性约束；因此这里将已生成文件正文按片段注入提示词，减少模型编造与前后矛盾。
-  const maxCharsByFile: Partial<Record<FileId, number>> = {
-    "01": 5000,
-    "02": 8000,
-    "03": 6000,
-    "04": 12000,
-    "05": 5000,
-    "06": 5000,
-  };
-
-  const blocks: string[] = [];
-  const baseFiles = meta.files.filter(f => f.fileId !== "07");
-  for (const file of baseFiles) {
-    const fileId = file.fileId;
-    try {
-      const raw = await readFileBody(meta.workspacePath, meta.runId, fileId);
-      const text = raw.trim();
-      if (!text) continue;
-      const maxChars = maxCharsByFile[fileId] ?? 2000;
-      blocks.push(`--- ${FILE_TO_ARTIFACT_KEY[fileId]} ---\n${clampText(text, maxChars)}\n`);
-    } catch {
-      continue;
-    }
-  }
-  return blocks.join("\n");
-}
 
 // SDD Input Snapshot
 export interface SddInputSnapshot {
@@ -1390,17 +1073,21 @@ export interface SddInputSnapshot {
     "02": string;
     "03": string;
     "04": string;
+    "05"?: string;
+    "06"?: string;
   };
 }
 
 async function buildSddInputSnapshot(meta: FileRunMeta, approvedSummary: string, fallbackContextOnly: boolean): Promise<SddInputSnapshot> {
-  const [skill, qa, evidence, file02, file03, file04] = await Promise.all([
+  const [skill, qa, evidence, file02, file03, file04, file05, file06] = await Promise.all([
     loadSkillContext(meta.workspacePath),
     Promise.resolve(buildQASnapshot(meta)),
     loadSddEvidence(meta),
     readFileBody(meta.workspacePath, meta.runId, "02").catch(() => ""),
     readFileBody(meta.workspacePath, meta.runId, "03").catch(() => ""),
     readFileBody(meta.workspacePath, meta.runId, "04").catch(() => ""),
+    readFileBody(meta.workspacePath, meta.runId, "05").catch(() => ""),
+    readFileBody(meta.workspacePath, meta.runId, "06").catch(() => ""),
   ]);
 
   const requirement = fallbackContextOnly ? clampText(meta.requirement, 6000) : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
@@ -1415,6 +1102,8 @@ async function buildSddInputSnapshot(meta: FileRunMeta, approvedSummary: string,
       "02": file02,
       "03": file03,
       "04": file04,
+      "05": file05,
+      "06": file06,
     }
   };
 }
@@ -1440,13 +1129,17 @@ export async function generateArtifactByLlm(
     extraPrompt = "\nMINIMALIST MODE: Output ONLY the core structure, bullet points, and basic outlines. DO NOT include detailed explanations or long texts. Keep it as short as possible while preserving the structure.";
   } else {
     if (fileId === "01") {
-      extraPrompt = "\nForce output Mermaid graph TD format. Must include at least 8 core use cases' implementation specs (API sequence, data validation rules, error codes).";
+      extraPrompt = "\nDo not output bloated Mermaid diagrams. Structure the document as a strict three-part format: 1. Business Rules (业务规则), 2. Interface Mapping (接口映射, e.g., describing operations functionally like CreateUser without inventing REST paths), 3. Acceptance Criteria (验收标准). DO NOT invent specific RESTful API paths (e.g. /api/v1/xxx). Specific API paths and methods are strictly reserved for 04.";
     } else if (fileId === "02") {
       extraPrompt = "\nForce output complete MySQL DDL table creation statements, including PK, FK, indexes (uk_, idx_) and business constraints.";
+    } else if (fileId === "03") {
+      extraPrompt = "\nForce output Mermaid stateDiagram-v2 format. Keep ONLY: state sets, transition conditions, and forbidden transitions. DO NOT invent roles or features (e.g. Admin disable/enable) that are not strictly present in the requirements. Use strict unidirectional transitions (-->) only, never use <--> or bidirectional symbols. Ensure state names and transition descriptions are logically consistent.";
     } else if (fileId === "04") {
       extraPrompt = "\nForce output OpenAPI 3.0 YAML specification, including $ref definitions for request/response.";
     } else if (fileId === "05") {
-      extraPrompt = "\nForce output pure HTML content. DO NOT prefix or suffix the HTML with any markdown text or explanations. Start strictly with <!DOCTYPE html>.";
+      extraPrompt = "\nForce output pure HTML content. Keep only structure and key interactions, remove non-essential visual descriptions. DO NOT prefix or suffix the HTML with any markdown text or explanations. Start strictly with <!DOCTYPE html>.";
+    } else if (fileId === "06") {
+      extraPrompt = "\nForce output valid Postman Collection JSON. MUST strip any markdown wrapper (like ```json).";
     }
   }
 
@@ -1460,7 +1153,7 @@ export async function generateArtifactByLlm(
   const baseSystemPrompt = MODELING_FILE_IDS.includes(fileId)
     ? MODELING_NODE_SYSTEM_PROMPT
     : fileId === "07"
-      ? SDD_NODE_SYSTEM_PROMPT
+      ? TASKS_NODE_SYSTEM_PROMPT
       : DETAILING_NODE_SYSTEM_PROMPT;
 
   const systemPrompt = baseSystemPrompt + "\n\nYou are generating a single file. Output ONLY the raw markdown/yaml/html/json content. DO NOT wrap it in JSON or any code blocks. No explanations, no filler. Ensure cross-file naming consistency.";
@@ -1492,6 +1185,11 @@ export async function generateArtifactByLlm(
   } else if (fileId === "05" && !content.startsWith("<!DOCTYPE html>") && content.includes("<!DOCTYPE html>")) {
     const htmlStart = content.indexOf("<!DOCTYPE html>");
     content = content.slice(htmlStart).replace(/```html/g, "").replace(/```/g, "").trim();
+  }
+
+  // 针对 06_API调试集合.json 被 Markdown包裹的清理
+  if (fileId === "06" && content.startsWith("```")) {
+    content = content.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
   }
 
   if (!content) {
@@ -1529,121 +1227,11 @@ export async function tryGenerateWithMcp(
   }
 }
 
-async function generateSddConstraintsDraft(
-  meta: FileRunMeta,
-  snapshot: SddInputSnapshot,
-  fallbackContextOnly: boolean,
-): Promise<SddConstraints> {
-  const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
-  const structured = model.withStructuredOutput(SddConstraintsSchema, { method: "functionCalling" });
-  
-  // --- 新增：硬性提取 02 和 04 的约束列表，喂给大模型防止幻觉遗漏 ---
-  const domainModelText = snapshot.files["02"];
-  const openApiText = snapshot.files["04"];
-  
-  // 提取表名
-  const tableMap = parseTableColumns(domainModelText);
-  const hardcodedTables = Array.from(tableMap.keys());
-  
-  // 提取 API
-  const apiSet = parseOpenApiSignatures(openApiText);
-  const hardcodedApis = Array.from(apiSet);
-
-  const payload = {
-    requirement: snapshot.requirement,
-    approvedSummary: clampText(snapshot.approvedSummary, 12000),
-    evidence: clampText(snapshot.evidence, 36000),
-    qa: clampText(snapshot.qa, 3000),
-    skill: clampText(snapshot.skill, 1800),
-    HARD_CONSTRAINTS: {
-      MUST_INCLUDE_TABLES: hardcodedTables,
-      MUST_INCLUDE_APIS: hardcodedApis
-    }
-  };
-
-  const systemPrompt = `仅输出SDD约束JSON，字段必须严格符合schema，要求与现有01-07内容一致；不要输出markdown或解释。
-非常重要：你必须确保生成的 JSON 中，tables 数组完全包含 payload.HARD_CONSTRAINTS.MUST_INCLUDE_TABLES 里的所有表；apis 数组完全包含 payload.HARD_CONSTRAINTS.MUST_INCLUDE_APIS 里的所有接口！一个都不能少！`;
-
-  const { result } = await invokeStructuredWithJsonFallback<SddConstraints>({
-    invokeStructured: async () =>
-      SddConstraintsSchema.parse(
-        await structured.invoke([
-          new SystemMessage(systemPrompt),
-          new HumanMessage(JSON.stringify(payload)),
-        ]),
-      ),
-    invokeFallback: () =>
-      model.invoke([
-        new SystemMessage(systemPrompt),
-        new HumanMessage(JSON.stringify(payload)),
-      ]),
-    safeParse: (value) => SddConstraintsSchema.safeParse(value),
-  });
-  return SddConstraintsSchema.parse(result);
-}
-
-function appendConstraintsBlock(markdown: string, constraints: SddConstraints): string {
-  const body = markdown.trim();
-  const jsonText = JSON.stringify(constraints, null, 2);
-  return [
-    body,
-    "",
-    "<!-- SDD_CONSTRAINTS_JSON_BEGIN -->",
-    "```json",
-    jsonText,
-    "```",
-    "<!-- SDD_CONSTRAINTS_JSON_END -->",
-  ].join("\n");
-}
-
-async function generateSddBodyWithConstraints(
-  meta: FileRunMeta,
-  snapshot: SddInputSnapshot,
-  constraints: SddConstraints,
-  fallbackContextOnly: boolean,
-  minimalist: boolean,
-): Promise<string> {
-  const model = createModel(meta, fallbackContextOnly ? 35000 : 45000);
-  const extraPrompt = minimalist
-    ? "\nMINIMALIST MODE: keep concise sections only."
-    : "";
-  const prompt =
-    [
-      buildSddPrompt(snapshot.requirement, snapshot.approvedSummary, snapshot.evidence, snapshot.qa, snapshot.skill),
-      "",
-      "Constraint JSON (SSOT):",
-      JSON.stringify(constraints),
-      "",
-      "必须严格依据Constraint JSON生成SDD正文，正文不要与约束冲突。",
-      "正文中不要再解释约束来源。",
-    ].join("\n") + extraPrompt;
-  const response = await model.invoke([
-    new SystemMessage(
-      SDD_NODE_SYSTEM_PROMPT +
-        "\n\n只输出SDD正文markdown，不要代码块包裹，不要JSON，不要解释。",
-    ),
-    new HumanMessage(prompt),
-  ]);
-  const text = typeof response.content === "string" ? response.content.trim() : "";
-  if (!text) {
-    throw new Error("SDD正文为空");
-  }
-  return text;
-}
-
-type SddGenerationDiagnostics = {
-  precheck: SddPrecheckResult;
-  gateInput: Record<string, unknown>;
-  gateResult: SddGateValidation;
-  constraints: SddConstraints;
-};
-
 export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId, attempt: number): Promise<{
   content: string;
   usedMcp: boolean;
   toolName: string | null;
   fallbackReason: string | null;
-  sddDiagnostics?: SddGenerationDiagnostics;
 }> {
   const approvedSummary = await loadApprovedArtifactSummary(meta);
   const isFallback = attempt >= 2;
@@ -1685,6 +1273,8 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
       "2. 任务必须直接转化为 Agent 可以执行的操作命令或文件读写动作。",
       "3. 格式必须极其精简，每一项任务严格使用 Markdown Checkbox `- [ ]`，并直接点出要操作的文件和具体目标。",
       "4. 分类例如：`## 1. Init Project`, `## 2. Database Schema`, `## 3. Backend APIs`, `## 4. Frontend Pages`。",
+      "5. **绝对禁止** 在开头或结尾输出任何寒暄、对话语（如“好的，作为任务编排器...”）。必须直接以第一行 Markdown 标题 `## ` 开头输出内容。",
+      "6. **接口级验收强制约束**：在 Backend APIs 任务分类下，每个接口的实现任务之后，必须紧跟具体的验收子任务。验收子任务必须明确指明：(a) 必填的请求/响应核心字段；(b) 特殊的错误码（如 401、403、429 等）及触发场景；(c) 鉴权失败或越权访问的具体边界行为。",
       "",
       "示例输出格式：",
       "## 2. Database Schema",
@@ -1792,11 +1382,34 @@ export async function withRunLock<T>(runId: string, fn: () => Promise<T>): Promi
 
 export async function filewiseGeneratePendingBaseFiles(meta: FileRunMeta): Promise<FileRunMeta> {
   const allowed = new Set(meta.selectedModules && meta.selectedModules.length > 0 ? [...meta.selectedModules, "01", "07"] : ["01", "07"]);
-  const pendingFiles = meta.files.filter(f => f.fileId !== "07" && allowed.has(f.fileId) && (f.status === "PENDING" || f.status === "FAILED" || f.status === "REJECTED"));
   
-  if (pendingFiles.length === 0) {
-    return meta;
+  // Phase 1: MODELING (02, 03, 04)
+  const modelingFiles = meta.files.filter(f => ["02", "03", "04"].includes(f.fileId) && allowed.has(f.fileId) && (f.status === "PENDING" || f.status === "FAILED" || f.status === "REJECTED"));
+  
+  if (modelingFiles.length > 0) {
+    await executeConcurrentGeneration(meta, modelingFiles);
+    return await readMeta(meta.workspacePath, meta.runId);
   }
+
+  // Only proceed to Detailing if Modeling is all APPROVED
+  const modelingReady = meta.files.filter(f => ["02", "03", "04"].includes(f.fileId) && allowed.has(f.fileId)).every(f => f.status === "APPROVED");
+  
+  if (!modelingReady) {
+    return meta; // Still waiting for user to approve modeling files
+  }
+
+  // Phase 2: DETAILING (05, 06)
+  const detailingFiles = meta.files.filter(f => ["05", "06"].includes(f.fileId) && allowed.has(f.fileId) && (f.status === "PENDING" || f.status === "FAILED" || f.status === "REJECTED"));
+  
+  if (detailingFiles.length > 0) {
+    await executeConcurrentGeneration(meta, detailingFiles);
+    return await readMeta(meta.workspacePath, meta.runId);
+  }
+
+  return meta;
+}
+
+async function executeConcurrentGeneration(meta: FileRunMeta, pendingFiles: FileRunFileState[]): Promise<void> {
 
   // Set all to GENERATING first
   for (const file of pendingFiles) {
@@ -1826,6 +1439,7 @@ export async function filewiseGeneratePendingBaseFiles(meta: FileRunMeta): Promi
       try {
         generated = await runSingleFileGeneration(meta, file.fileId, attempt);
         await writeFileBody(meta.workspacePath, meta.runId, file.fileId, generated.content);
+        await validateApiConsistency(meta, file.fileId, generated.content);
         return { file, success: true, generated, attempt };
       } catch (err) {
         lastError = err;
@@ -1899,7 +1513,6 @@ export async function filewiseGeneratePendingBaseFiles(meta: FileRunMeta): Promi
   }
 
   await saveMeta(freshMeta);
-  return freshMeta;
 }
 
 export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRunMeta> {
@@ -1927,7 +1540,6 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
   await appendEventLog(meta.workspacePath, meta.runId, "FILE_STAGE_CHANGED", { fileId, status: "GENERATING" });
 
   let lastError: unknown = null;
-  let lastSddDiagnostics: SddGenerationDiagnostics | null = null;
   for (const attempt of [1, 2, 3]) {
     try {
       const generated = await runSingleFileGeneration(meta, fileId, attempt);
@@ -1935,15 +1547,19 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
         await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
-          summary: "正在落盘 SDD 正文与约束文件...",
+          summary: "正在落盘 Actionable Tasks 任务清单文件...",
         });
         emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
-          summary: "正在落盘 SDD 正文与约束文件...",
+          summary: "正在落盘 Actionable Tasks 任务清单文件...",
         });
       }
       await writeFileBody(meta.workspacePath, meta.runId, fileId, generated.content);
+      
+      // P3: 一致性校验守卫
+      await validateApiConsistency(meta, fileId, generated.content);
+
       if (fileId === "07") {
         // SDD Diagnostics/Gate logic has been completely removed in the new 07 Actionable Tasks workflow
         // to embrace the lightweight and streamlined philosophy.
@@ -2004,7 +1620,7 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
           lowered.includes("timed out") ||
           lowered.includes("econn") ||
           lowered.includes("socket hang up");
-        await appendEventLog(meta.workspacePath, meta.runId, "SDD_FAILURE_SUMMARY", {
+        await appendEventLog(meta.workspacePath, meta.runId, "TASKS_FAILURE_SUMMARY", {
           fileId,
           top3: message || "任务清单生成失败",
           suggestion: networkLike
@@ -2101,4 +1717,30 @@ function wssBroadcastTaskEvent(wss: WebSocketServer, runId: string, eventType: s
       client.send(msg);
     }
   });
+}
+async function loadSddEvidence(meta: FileRunMeta): Promise<string> {
+  const maxCharsByFile: Partial<Record<FileId, number>> = {
+    "01": 5000,
+    "02": 8000,
+    "03": 6000,
+    "04": 12000,
+    "05": 5000,
+    "06": 5000,
+  };
+
+  const blocks: string[] = [];
+  const baseFiles = meta.files.filter(f => f.fileId !== "07");
+  for (const file of baseFiles) {
+    const fileId = file.fileId;
+    try {
+      const raw = await readFileBody(meta.workspacePath, meta.runId, fileId);
+      const text = raw.trim();
+      if (!text) continue;
+      const maxChars = maxCharsByFile[fileId] ?? 2000;
+      blocks.push(`--- ${FILE_TO_ARTIFACT_KEY[fileId]} ---\n${clampText(text, maxChars)}\n`);
+    } catch {
+      continue;
+    }
+  }
+  return blocks.join("\n");
 }

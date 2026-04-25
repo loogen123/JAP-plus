@@ -1,4 +1,29 @@
+
     const API_BASE = "";
+
+    // ---------------- 全局防重点击 (Anti-Double-Click) ----------------
+    function createSpinner() {
+      return '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+    }
+    
+    // 全局锁定器，包裹所有高危按钮点击事件
+    function lockButton(btnEl) {
+      if (!btnEl || btnEl.disabled) return false; // Already locked or missing
+      btnEl.dataset.originalHtml = btnEl.innerHTML;
+      btnEl.disabled = true;
+      btnEl.innerHTML = createSpinner() + '处理中...';
+      return true; // Lock acquired
+    }
+    
+    function unlockButton(btnEl) {
+      if (!btnEl) return;
+      btnEl.disabled = false;
+      if (btnEl.dataset.originalHtml) {
+        btnEl.innerHTML = btnEl.dataset.originalHtml;
+      }
+    }
+    // -----------------------------------------------------------------
+
     const SESSION_LLM_CONFIG_KEY = "jap.llm.session.config";
     const LOCAL_WORKSPACE_PATH_KEY = "jap.workspace.path";
     const SESSION_ELICITATION_MODE_KEY = "jap.elicitation.mode";
@@ -835,11 +860,6 @@
     async function autoRunLoop() {
       while(isAutoRunning && currentRunId && currentRunState) {
         const actions = currentRunState.actions || {};
-        if(currentRunState.currentFile === "07") {
-          addLog("系统", "基础设计文件已完成，自动生成停止在开发任务清单前", "success");
-          toggleAutoRun();
-          break;
-        }
         if(currentRunState.stage === "DONE" || !currentRunState.currentFile) {
           addLog("系统", "自动生成已完成", "success");
           toggleAutoRun();
@@ -966,7 +986,7 @@
         addLog("错误",String(error?.message||error),"error");
       }
     }
-    async function confirmGenerateSddWithSource(){
+    async function confirmGenerateTasksWithSource(){
       if(!selectedTasksSourceRunId){ addLog("系统","请先选择历史流程"); return; }
       const btn = document.getElementById("tasksSourceConfirmBtn");
       btn.disabled = true;
@@ -1585,6 +1605,8 @@
     }
     async function filewiseGenerateBaseNext(){
       if(!currentRunId){ addLog("系统","当前不是 filewise 任务"); return; }
+      const llm = buildTaskLlmConfig();
+      if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
       isGeneratingBase = true;
       renderWorkflowButtons();
       try{
@@ -1592,7 +1614,10 @@
         const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-base-next`,{
           method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({workspace: workspacePath ? {path:workspacePath} : undefined})
+          body:JSON.stringify({
+            llm,
+            workspace: workspacePath ? {path:workspacePath} : undefined
+          })
         });
         const data=await resp.json();
         if(!resp.ok){
@@ -1627,6 +1652,7 @@
           method:"POST",
           headers:{"Content-Type":"application/json"},
           body:JSON.stringify({
+            llm,
             sourceRunId: sourceRunId || undefined,
             workspace: workspacePath ? {path:workspacePath} : undefined
           })
@@ -1749,12 +1775,17 @@
     }
     async function filewiseRegenerate(){
       if(!currentRunId || !currentRunState?.currentFile){ return; }
+      const llm = buildTaskLlmConfig();
+      if(!llm){ addLog("错误","请先在设置中配置 API Key","error"); openSettings(); return; }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
       const fileId = currentRunState.currentFile;
       const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/files/${encodeURIComponent(fileId)}/regenerate`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({workspace: workspacePath ? {path:workspacePath} : undefined})
+        body:JSON.stringify({
+          llm,
+          workspace: workspacePath ? {path:workspacePath} : undefined
+        })
       });
       const data=await resp.json();
       if(!resp.ok){
@@ -2074,3 +2105,619 @@
       refreshDesignButtonState();
       addLog("系统","界面已就绪：先点 AI 澄清，再生成设计套件");
     });
+
+window.addEventListener("error", (e) => {
+  if (typeof addLog === "function") {
+    addLog("浏览器拦截错误", String(e.message || e.error), "error");
+  }
+});
+window.addEventListener("unhandledrejection", (e) => {
+  if (typeof addLog === "function") {
+    addLog("未处理Promise异常", String(e.reason?.message || e.reason), "error");
+  }
+});
+
+
+// --- AUTOMATIC BUTTON LOCK WRAPPERS ---
+
+if (typeof generateQuestionnaire === "function") {
+  const _orig_generateQuestionnaire = generateQuestionnaire;
+  generateQuestionnaire = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_generateQuestionnaire(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof startDesignOnly === "function") {
+  const _orig_startDesignOnly = startDesignOnly;
+  startDesignOnly = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_startDesignOnly(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof filewiseGenerateNext === "function") {
+  const _orig_filewiseGenerateNext = filewiseGenerateNext;
+  filewiseGenerateNext = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_filewiseGenerateNext(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof toggleAutoRun === "function") {
+  const _orig_toggleAutoRun = toggleAutoRun;
+  toggleAutoRun = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_toggleAutoRun(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof sendChatMessage === "function") {
+  const _orig_sendChatMessage = sendChatMessage;
+  sendChatMessage = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_sendChatMessage(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof filewiseSaveEdit === "function") {
+  const _orig_filewiseSaveEdit = filewiseSaveEdit;
+  filewiseSaveEdit = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_filewiseSaveEdit(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof filewiseRegenerate === "function") {
+  const _orig_filewiseRegenerate = filewiseRegenerate;
+  filewiseRegenerate = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_filewiseRegenerate(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof filewiseReject === "function") {
+  const _orig_filewiseReject = filewiseReject;
+  filewiseReject = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_filewiseReject(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof filewiseApprove === "function") {
+  const _orig_filewiseApprove = filewiseApprove;
+  filewiseApprove = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_filewiseApprove(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof chooseWorkspaceFolder === "function") {
+  const _orig_chooseWorkspaceFolder = chooseWorkspaceFolder;
+  chooseWorkspaceFolder = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_chooseWorkspaceFolder(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof testLlmConnection === "function") {
+  const _orig_testLlmConnection = testLlmConnection;
+  testLlmConnection = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_testLlmConnection(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof finishQuestionnaire === "function") {
+  const _orig_finishQuestionnaire = finishQuestionnaire;
+  finishQuestionnaire = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_finishQuestionnaire(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof regenerateFinalRequirement === "function") {
+  const _orig_regenerateFinalRequirement = regenerateFinalRequirement;
+  regenerateFinalRequirement = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_regenerateFinalRequirement(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+
+if (typeof chooseHistoryWorkspaceFolder === "function") {
+  const _orig_chooseHistoryWorkspaceFolder = chooseHistoryWorkspaceFolder;
+  chooseHistoryWorkspaceFolder = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_chooseHistoryWorkspaceFolder(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof loadHistoryList === "function") {
+  const _orig_loadHistoryList = loadHistoryList;
+  loadHistoryList = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_loadHistoryList(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof continueFromHistory === "function") {
+  const _orig_continueFromHistory = continueFromHistory;
+  continueFromHistory = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_continueFromHistory(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof chooseTasksSourceWorkspaceFolder === "function") {
+  const _orig_chooseTasksSourceWorkspaceFolder = chooseTasksSourceWorkspaceFolder;
+  chooseTasksSourceWorkspaceFolder = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_chooseTasksSourceWorkspaceFolder(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof loadTasksSourceRuns === "function") {
+  const _orig_loadTasksSourceRuns = loadTasksSourceRuns;
+  loadTasksSourceRuns = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_loadTasksSourceRuns(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+if (typeof confirmGenerateTasksWithSource === "function") {
+  const _orig_confirmGenerateTasksWithSource = confirmGenerateTasksWithSource;
+  confirmGenerateTasksWithSource = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_confirmGenerateTasksWithSource(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+
+
+
+if (typeof filewiseGenerateBaseNext === "function") {
+  const _orig_filewiseGenerateBaseNext = filewiseGenerateBaseNext;
+  filewiseGenerateBaseNext = async function(...args) {
+    const btn = document.activeElement && (document.activeElement.tagName === 'BUTTON' || document.activeElement.classList.contains('btn')) ? document.activeElement : null;
+    let locked = false;
+    let spinner = null;
+    if (btn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner = document.createElement('span');
+      spinner.innerHTML = '<svg viewBox="0 0 50 50" style="width:14px;height:14px;animation:spin 1s linear infinite;margin-right:6px;display:inline-block;vertical-align:middle;"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="31.4 31.4" opacity="0.8"></circle></svg>';
+      btn.prepend(spinner);
+      locked = true;
+    }
+    try {
+      return await _orig_filewiseGenerateBaseNext(...args);
+    } finally {
+      if (locked && btn) {
+        btn.disabled = false;
+        if (spinner && spinner.parentNode === btn) {
+          btn.removeChild(spinner);
+        }
+        // Force refresh buttons if they were globally managed
+        if (typeof renderWorkflowButtons === "function") renderWorkflowButtons();
+      }
+    }
+  };
+}
+

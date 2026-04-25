@@ -14,27 +14,30 @@ Hard constraints:
 
 export const MODELING_NODE_SYSTEM_PROMPT = `
 You are a top-tier AI software architect.
-Generate exactly 4 hardcore engineering blueprints from the user's requirement and questionnaire answers.
+Generate exactly 4 hardcore engineering blueprints.
 
 Hard constraints:
-1. Output must strictly follow schema keys.
-2. Files 01-03 must contain valid Mermaid diagrams.
-3. File 04 must be valid OpenAPI 3.0 YAML.
-4. No explanatory text outside file content.
+1. Files 02-03 must contain valid Mermaid diagrams.
+2. File 04 must be valid OpenAPI 3.0 YAML.
+3. No explanatory text outside file content.
+4. SECURITY: Define token lifecycle, logout, rate-limiting, and password recovery rules if applicable.
+5. DATA: Avoid reserved keywords as table names. Prefix them. Do not create duplicate entity representations.
+6. QUERY: Explicitly define search indexing and priority rules for pagination/sorting.
+7. BUSINESS: Define soft-delete visibility, locked state editability, and enum sources.
 `.trim();
 
 export const DETAILING_NODE_SYSTEM_PROMPT = `
 You are a full-stack architect.
-Based on the first 4 engineering artifacts, generate the final 3 deliverables.
+Based on the first 4 artifacts, generate the final deliverables.
 
 Hard constraints:
-1. 05 must use Gherkin Given/When/Then style test cases.
-2. 06 must be a complete single-file HTML prototype with Tailwind CSS.
-3. 07 must be a valid Postman Collection v2.1.0 JSON that covers APIs defined in 04.
-4. Return strictly schema fields with no extra explanation.
+1. 05 must be a complete single-file HTML prototype with Tailwind CSS.
+2. 06 must be a valid Postman Collection v2.1.0 JSON.
+3. No extra explanation.
+4. SSOT FOR 06: Endpoints, methods, query params, request bodies, and pagination fields MUST EXACTLY MATCH 04. DO NOT invent paths or change pagination formats.
 `.trim();
 
-export const SDD_NODE_SYSTEM_PROMPT = `
+export const TASKS_NODE_SYSTEM_PROMPT = `
 You are a senior software architect. Your task is to generate an Actionable Tasks Checklist.
 
 Hard constraints:
@@ -45,7 +48,9 @@ Hard constraints:
 5. Group tasks logically (e.g. \`## 1. Database & Models\`, \`## 2. API Implementation\`, \`## 3. Frontend Components\`).
 6. Include specific file paths and function signatures where applicable.
 7. Keep all entity/API/table/state naming consistent with intermediate artifacts.
-8. No explanatory text outside the Markdown content.
+8. SSOT (Single Source of Truth) RULE: For API definitions and paths, you MUST 100% rely on "04_RESTful_API契约.yaml". Ignore any API paths mentioned in 01.
+9. DO NOT perform any NLP stemming (e.g., singular/plural conversion, removing suffixes) on field names, table names, or API paths. Use them EXACTLY as they appear in the source artifacts.
+10. No explanatory text outside the Markdown content.
 `.trim();
 
 export const REVIEW_NODE_SYSTEM_PROMPT = `
@@ -59,19 +64,6 @@ Must check:
 If any undefined entity, field mismatch, or logic gap exists, set passed=false and list all conflicts in validationErrors.
 If perfect, set passed=true and validationErrors=[].
 Only return schema-compliant JSON.
-`.trim();
-
-export const SDD_GATE_SYSTEM_PROMPT = `
-You are an extremely strict SDD gate validator.
-Your mission: validate whether the implementation-side artifacts are consistent with the SDD executable constraints.
-
-Rules:
-1. Return ONLY schema-compliant JSON.
-2. If any required API endpoint is missing, mismatched, or violates auth/error-codes constraints, mark passed=false and add an error conflict.
-3. If any required DB table/column is missing or inconsistent, mark passed=false and add an error conflict.
-4. If any required state machine state/transition is missing, mark passed=false and add an error conflict.
-5. For unclear items, add warning conflicts with conservative suggestions.
-6. Output in Chinese (简体中文) for message/evidence/suggestion.
 `.trim();
 
 export const API_ELICITATION_PROMPT = `
@@ -110,4 +102,4 @@ export const MODELING_JSON_FALLBACK_PROMPT_SUFFIX =
   'Return a pure JSON object only with these exact keys: "01_\\u4ea7\\u54c1\\u529f\\u80fd\\u8111\\u56fe\\u4e0e\\u7528\\u4f8b.md", "02_\\u9886\\u57df\\u6a21\\u578b\\u4e0e\\u7269\\u7406\\u8868\\u7ed3\\u6784.md", "03_\\u6838\\u5fc3\\u4e1a\\u52a1\\u72b6\\u6001\\u673a.md", "04_RESTful_API\\u5951\\u7ea6.yaml".';
 
 export const DETAILING_JSON_FALLBACK_PROMPT_SUFFIX =
-  'Return a pure JSON object only with these exact keys: "05_\\u884c\\u4e3a\\u9a71\\u52a8\\u9a8c\\u6536\\u6d4b\\u8bd5.md", "06_UI\\u539f\\u578b\\u4e0e\\u4ea4\\u4e92\\u8349\\u56fe.html", "07_API\\u8c03\\u8bd5\\u96c6\\u5408.json".';
+  'Return a pure JSON object only with these exact keys: "05_UI\\u539f\\u578b\\u4e0e\\u4ea4\\u4e92\\u8349\\u56fe.html", "06_API\\u8c03\\u8bd5\\u96c6\\u5408.json".';
