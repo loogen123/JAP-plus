@@ -260,7 +260,7 @@
       const code = data?.errorCode || "SDD_GENERATION_FAILED";
       const stage = data?.stage || "DETAILING";
       const lastEventAt = data?.lastEventAt ? ` lastEventAt=${data.lastEventAt}` : "";
-      const msg = data?.message || "任务清单生成失败";
+      const msg = data?.message || "SDD约束总览生成失败";
       return `[${code}] stage=${stage}${lastEventAt} | ${msg}`;
     }
     function rememberEventLogKey(key){
@@ -283,7 +283,7 @@
         return;
       }
       if(type === "SDD_FAILURE_SUMMARY"){
-        addLog("任务清单失败",`Top3冲突: ${e?.top3 || "无"} | 建议: ${e?.suggestion || "请先修正01-07后重试"}`,"error");
+        addLog("约束总览失败",`Top3冲突: ${e?.top3 || "无"} | 建议: ${e?.suggestion || "请先修正01-07后重试"}`,"error");
         return;
       }
       if(type === "SDD_GATE_VALIDATED"){
@@ -297,7 +297,7 @@
         return;
       }
       if(type === "TASKS_SOURCE_IMPORTED"){
-        addLog("任务生成阶段","历史1-7导入完成，开始生成08","info");
+        addLog("任务生成阶段","历史资料导入完成，开始生成07约束总览","info");
       }
     }
     async function pullRecentEvents(tail=200){
@@ -370,9 +370,9 @@
         if (busy) {
           nextBtn.innerText = "生成中...";
         } else if (currentFile === "01") {
-          nextBtn.innerText = "生成需求草案 (01)";
+          nextBtn.innerText = "生成 Agent 执行资料包 (01)";
         } else if (currentFile === "07") {
-          nextBtn.innerText = "生成可执行任务清单 (08)";
+          nextBtn.innerText = "生成 SDD 约束总览 (07)";
         } else if (currentFile && currentFile !== "01" && currentFile !== "07") {
           nextBtn.innerText = "并发生成架构设计模块 (02-07)";
         } else {
@@ -934,7 +934,7 @@
     }
     function openTasksSourceModal(){
       if(currentRunId && currentRunState?.currentFile !== "07"){
-        addLog("系统","当前不在7号文件阶段，不能生成任务清单");
+        addLog("系统","当前不在7号文件阶段，不能生成约束总览");
         return;
       }
       const currentPath = getActiveWorkspacePath();
@@ -991,12 +991,12 @@
       const btn = document.getElementById("tasksSourceConfirmBtn");
       btn.disabled = true;
       closeTasksSourceModal();
-      addLog("系统",`已开始生成任务清单，历史流程=${selectedTasksSourceRunId}`);
+      addLog("系统",`已开始生成SDD约束总览，历史流程=${selectedTasksSourceRunId}`);
       try{
     if(currentRunId){
-      addLog("系统",`在当前任务 ${currentRunId} 上导入历史1-7并生成任务清单...`);
+      addLog("系统",`在当前任务 ${currentRunId} 上导入历史资料并生成07约束总览...`);
       await filewiseGenerateTasks(selectedTasksSourceRunId);
-      addLog("系统","任务清单生成流程已提交完成","success");
+      addLog("系统","约束总览生成流程已提交完成","success");
     } else {
       const llm=buildTaskLlmConfig();
       if(!llm){
@@ -1008,7 +1008,7 @@
         return;
       }
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-      addLog("系统","正在基于历史流程创建任务并生成任务清单...");
+      addLog("系统","正在基于历史流程生成07约束总览...");
       isGeneratingSdd = true;
       renderWorkflowButtons();
       startSddHeartbeat();
@@ -1042,10 +1042,10 @@
       currentRunState = data;
       recentEventLastAt = data?.lastEventAt || recentEventLastAt;
       await refreshFilewiseRun();
-      addLog("系统",`任务清单生成完成，任务ID=${currentRunId}`,"success");
+      addLog("系统",`SDD约束总览生成完成，任务ID=${currentRunId}`,"success");
     }
   } catch (error) {
-        addLog("错误",`任务清单生成异常：${String(error?.message||error)}`,"error");
+        addLog("错误",`SDD约束总览生成异常：${String(error?.message||error)}`,"error");
         await pullRecentEvents(200);
         stopSddHeartbeat();
       } finally {
@@ -1645,7 +1645,7 @@
       renderWorkflowButtons();
       startSddHeartbeat();
       const workspacePath=(document.getElementById("workspacePath").value||"").trim();
-      addLog("系统","正在生成开发任务清单(Tasks)...");
+      addLog("系统","正在生成 SDD 约束总览...");
       
       try {
         const resp=await fetch(API_BASE+`/api/v1/tasks/filewise/${encodeURIComponent(currentRunId)}/generate-sdd`,{
@@ -1677,7 +1677,7 @@
         currentRunState = data;
         await refreshFilewiseRun();
       } catch (err) {
-        addLog("错误","生成任务清单请求异常: " + String(err?.message || err), "error");
+        addLog("错误","生成SDD约束总览请求异常: " + String(err?.message || err), "error");
         stopSddHeartbeat();
       } finally {
         isGeneratingSdd = false;
@@ -1848,7 +1848,7 @@
       container.innerHTML = `
         <div class="chat-bubble ai">
           你好！我是 J-AP Plus 架构助手。<br><br>
-          请告诉我你想做一个什么样的软件？我们可以边聊边构思。如果你已经想得很清楚了，也可以直接输入，然后点击下方的【一键固化为需求草案 (01)】直接立项！
+          请告诉我你想做一个什么样的软件？我们可以边聊边构思。如果你已经想得很清楚了，也可以直接输入，然后点击下方的【生成 Agent 执行资料包】直接立项！
         </div>
       `;
       chatMessages.forEach(msg => {
@@ -2043,7 +2043,7 @@
         addLog("系统",`任务创建成功：${currentRunId}`,"success");
         
         // Auto trigger next immediately for sandbox mode to generate 01 draft
-        addLog("系统","正在自动生成 01_需求草案...");
+        addLog("系统","正在自动生成 01_需求简报...");
         await filewiseGenerateBaseNext();
       }catch(error){ addLog("错误",String(error?.message||error),"error"); }
       finally { designSubmitting = false; refreshDesignButtonState(); }

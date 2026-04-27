@@ -27,6 +27,7 @@ import {
   getRunLastEventAt,
 } from "../services/taskService.js";
 import { emitTaskScopedEvent } from "../runtime/workflowEvents.js";
+import { ARTIFACT_FILES } from "../constants/domainConstants.js";
 
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
@@ -325,11 +326,11 @@ export class TaskController {
       await withRunLock(runId, async () => {
         const meta = await readMeta(workspacePath, runId);
         
-        // Ensure 01 and 08 are always included
+        // Ensure 01 and 07 are always included
         const allowed = new Set([...selectedModules, "01", "07"]);
         
         // Keep ALL files in meta.files, but we can just update meta.selectedModules
-        // The backend generation logic only generates files that are PENDING and != 08.
+        // The backend generation logic only generates files that are PENDING and != 07.
         // Wait, if unselected files are still PENDING, the concurrent generator WILL try to generate them!
         // So we MUST mark unselected files as SKIPPED so the generator ignores them.
         
@@ -349,13 +350,13 @@ export class TaskController {
         // Add files that are selected but missing
         const existingIds = new Set(meta.files.map(f => f.fileId));
         const allSpecs = [
-          { fileId: "01", artifactName: "01_功能脑图与用例.md" },
-          { fileId: "02", artifactName: "02_数据库表物理结构.md" },
-          { fileId: "03", artifactName: "03_核心业务状态机.md" },
-          { fileId: "04", artifactName: "04_API接口契约.yaml" },
-          { fileId: "05", artifactName: "05_UI原型与交互草图.html" },
-          { fileId: "06", artifactName: "06_API调试集合.json" },
-          { fileId: "07", artifactName: "07_Actionable_Tasks.md" }
+          { fileId: "01", artifactName: ARTIFACT_FILES.modeling01 },
+          { fileId: "02", artifactName: ARTIFACT_FILES.modeling02 },
+          { fileId: "03", artifactName: ARTIFACT_FILES.modeling03 },
+          { fileId: "04", artifactName: ARTIFACT_FILES.modeling04 },
+          { fileId: "05", artifactName: ARTIFACT_FILES.detailing05 },
+          { fileId: "06", artifactName: ARTIFACT_FILES.detailing06 },
+          { fileId: "07", artifactName: ARTIFACT_FILES.sdd07 }
         ] as const;
         
         for (const spec of allSpecs) {
@@ -414,9 +415,15 @@ export class TaskController {
         }
         await filewiseGenerateCurrent(meta);
       });
+      if (res.headersSent) {
+        return;
+      }
       const refreshed = await readMeta(workspacePath, runId);
       res.json(toFileStatusResponse(refreshed, workspacePath));
     } catch (error) {
+      if (res.headersSent) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });
     }
@@ -450,9 +457,15 @@ export class TaskController {
           await filewiseGeneratePendingBaseFiles(meta);
         }
       });
+      if (res.headersSent) {
+        return;
+      }
       const refreshed = await readMeta(workspacePath, runId);
       res.json(toFileStatusResponse(refreshed, workspacePath));
     } catch (error) {
+      if (res.headersSent) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });
     }
@@ -489,7 +502,7 @@ export class TaskController {
           if (!meta.files.find(f => f.fileId === "07")) {
             meta.files.push({
               fileId: "07",
-              artifactName: "07_Actionable_Tasks.md",
+              artifactName: ARTIFACT_FILES.sdd07,
               status: "PENDING",
               retries: 0,
               lastError: null,
@@ -546,9 +559,15 @@ export class TaskController {
           await appendEventLog(workspacePath, targetRunId, "FILE_APPROVED", { fileId: "07", auto: true });
         }
       });
+      if (res.headersSent) {
+        return;
+      }
       const finalMeta = await readMeta(workspacePath, targetRunId);
       res.json(toFileStatusResponse(finalMeta, workspacePath));
     } catch (error) {
+      if (res.headersSent) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       const payload = await this.buildSddErrorPayload(workspacePath, runId, "DETAILING", message);
       res.status(500).json(payload);
@@ -628,7 +647,7 @@ export class TaskController {
         if (!sourceMeta.files.find(f => f.fileId === "07")) {
           sourceMeta.files.push({
             fileId: "07",
-            artifactName: "07_Actionable_Tasks.md",
+            artifactName: ARTIFACT_FILES.sdd07,
             status: "PENDING",
             retries: 0,
             lastError: null,
@@ -639,7 +658,7 @@ export class TaskController {
           });
         }
 
-        // 关键修复：强制将任务指针移动到 08，否则前端审批时会报 "only current file can be approved"
+        // 关键修复：强制将任务指针移动到 07，否则前端审批时会报 "only current file can be approved"
         sourceMeta.currentFile = "07";
         sourceMeta.stage = "DETAILING";
         
@@ -671,6 +690,9 @@ export class TaskController {
           await appendEventLog(workspacePath, sourceRunId, "LOG_ADDED", { logType: "INFO", title: "系统", summary: "07 文件已生成并通过自动审核" });
         }
       });
+      if (res.headersSent) {
+        return;
+      }
       const finalRefreshed = await readMeta(workspacePath, sourceRunId);
       const lastEventAt = await getRunLastEventAt(workspacePath, sourceRunId);
       res.json({
@@ -680,6 +702,9 @@ export class TaskController {
         lastEventAt,
       });
     } catch (error) {
+      if (res.headersSent) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       const payload = await this.buildSddErrorPayload(
         workspacePath,
@@ -725,9 +750,15 @@ export class TaskController {
           stage: meta.stage,
         });
       });
+      if (res.headersSent) {
+        return;
+      }
       const finalMeta = await readMeta(workspacePath, runId);
       res.json(toFileStatusResponse(finalMeta, workspacePath));
     } catch (error) {
+      if (res.headersSent) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });
     }
@@ -758,9 +789,15 @@ export class TaskController {
         emitTaskScopedEvent(runId, "FILE_REJECTED", { runId, fileId, status: "REJECTED", reason });
         await appendEventLog(workspacePath, runId, "FILE_REJECTED", { fileId, reason });
       });
+      if (res.headersSent) {
+        return;
+      }
       const finalMeta = await readMeta(workspacePath, runId);
       res.json(toFileStatusResponse(finalMeta, workspacePath));
     } catch (error) {
+      if (res.headersSent) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });
     }
@@ -809,9 +846,15 @@ export class TaskController {
         updatedMeta.stage = deriveStageFromCurrentFile(originalCurrentFile);
         await saveMeta(updatedMeta);
       });
+      if (res.headersSent) {
+        return;
+      }
       const finalMeta = await readMeta(workspacePath, runId);
       res.json(toFileStatusResponse(finalMeta, workspacePath));
     } catch (error) {
+      if (res.headersSent) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });
     }
@@ -844,9 +887,15 @@ export class TaskController {
         emitTaskScopedEvent(runId, "FILE_EDITED", { runId, fileId, status: "REVIEWING" });
         await appendEventLog(workspacePath, runId, "FILE_EDITED", { fileId, size: content.length });
       });
+      if (res.headersSent) {
+        return;
+      }
       const finalMeta = await readMeta(workspacePath, runId);
       res.json(toFileStatusResponse(finalMeta, workspacePath));
     } catch (error) {
+      if (res.headersSent) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });
     }

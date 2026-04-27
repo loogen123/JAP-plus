@@ -392,16 +392,16 @@ export type FileSpec = {
   fileId: FileId;
   stage: Exclude<FileRunStage, "DONE">;
   artifactName: string;
-  ext: "md" | "yaml" | "html" | "json";
+  ext: "md";
 };
 
 const FILE_SPECS: ReadonlyArray<FileSpec> = [
   { fileId: "01", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling01, ext: "md" },
   { fileId: "02", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling02, ext: "md" },
   { fileId: "03", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling03, ext: "md" },
-  { fileId: "04", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling04, ext: "yaml" },
-  { fileId: "05", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing05, ext: "html" },
-  { fileId: "06", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing06, ext: "json" },
+  { fileId: "04", stage: "MODELING", artifactName: ARTIFACT_FILES.modeling04, ext: "md" },
+  { fileId: "05", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing05, ext: "md" },
+  { fileId: "06", stage: "DETAILING", artifactName: ARTIFACT_FILES.detailing06, ext: "md" },
   { fileId: "07", stage: "DETAILING", artifactName: ARTIFACT_FILES.sdd07, ext: "md" },
 ];
 
@@ -432,52 +432,10 @@ export type FileRunFileState = {
   updatedAt: string;
 };
 
-import yaml from 'js-yaml';
-
 export async function validateApiConsistency(meta: FileRunMeta, fileId: string, content: string): Promise<void> {
-  if (fileId !== "01" && fileId !== "06") return;
-
-  const runPaths = getRunPaths(meta.workspacePath, meta.runId);
-  const file04Path = path.join(runPaths.runDir, "04_RESTful_API契约.yaml");
-  let yamlContent = "";
-  try {
-    yamlContent = await fs.readFile(file04Path, "utf-8");
-  } catch(e) {
-    return; // 04 not generated yet, skip
-  }
-
-  let paths04 = new Set<string>();
-  try {
-    const parsed04 = yaml.load(yamlContent) as any;
-    if (parsed04 && parsed04.paths) {
-      for (const p of Object.keys(parsed04.paths)) {
-        for (const m of Object.keys(parsed04.paths[p])) {
-          paths04.add(`${m.toUpperCase()} ${p}`);
-        }
-      }
-    }
-  } catch(e) {
-    // ignore
-  }
-
-  const regex = /(GET|POST|PUT|DELETE|PATCH)\s+(\/[a-zA-Z0-9_\-\/\{\}]+)/ig;
-  let match;
-  let missing = [];
-  while ((match = regex.exec(content)) !== null) {
-    if (!match || !match[1] || !match[2]) continue;
-    const api = `${match[1].toUpperCase()} ${match[2]}`;
-    if (!paths04.has(api)) {
-      missing.push(api);
-    }
-  }
-
-  if (missing.length > 0) {
-    await appendEventLog(meta.workspacePath, meta.runId, "API_CONSISTENCY_FAILED", {
-      fileId,
-      message: `发现 04 中未定义的 API: ${missing.join(", ")}`,
-    });
-    throw new Error(`API一致性校验失败: 发现 04 中未定义的 API: ${missing.join(", ")}`);
-  }
+  void meta;
+  void fileId;
+  void content;
 }
 
 type FileRunMeta = {
@@ -1021,9 +979,10 @@ export function buildDetailingPrompt(fileId: ArtifactFileId, requirement: string
     approvedSummary || "(none)",
     "",
     "Constraints:",
-    "05 must be complete single-file HTML UI prototypes.",
-    "06 must be valid Postman Collection 2.1 JSON or similar generic API debugging collection.",
-    "API definitions in 06 MUST strictly derive from 04_RESTful_API契约.yaml.",
+    "Only output content within the target file responsibility.",
+    "Do not write implementation details: DB table names, REST paths, component names, or directories.",
+    "Do not add requirements outside existing requirement and approved artifacts.",
+    "Use concise, actionable, constraint-oriented wording for development agents.",
     "",
     "Skill context:",
     clampText(skill, 1800),
@@ -1046,68 +1005,16 @@ export function buildSddPrompt(requirement: string, approvedSummary: string, evi
     clampText(qa, 3000),
     "",
     "Constraints:",
-    "THIS IS THE FINAL ARTIFACT. DO NOT write a traditional long-form Software Design Document.",
-    "Instead, you MUST output a highly actionable, structured developer checklist (Tasks Checklist).",
-    "Each task MUST be a specific, actionable step (e.g. creating a file, writing a function, creating a table) and start with a markdown checkbox `- [ ]`.",
-    "Group tasks logically (e.g. `## 1. Database & Models`, `## 2. API Implementation`, `## 3. Frontend Components`).",
-    "Include specific file paths and function signatures where applicable.",
-    "Keep all entity/API/table/state naming consistent with intermediate artifacts.",
-    "5. **绝对禁止** 在开头或结尾输出任何寒暄、对话语（如“好的，作为任务编排器...”）。必须直接以第一行 Markdown 标题 `## ` 开头输出内容。",
-    "6. **接口级验收强制约束**：在 Backend APIs 任务分类下，每个接口的实现任务之后，必须紧跟具体的验收子任务。验收子任务必须明确指明：(a) 必填的请求/响应核心字段；(b) 特殊的错误码（如 401、403、429 等）及触发场景；(c) 鉴权失败或越权访问的具体边界行为。",
+    "This file is SDD constraints overview, not implementation tasks.",
+    "Only describe file-level scope source, terminology source, and cross-file constraints.",
+    "Explicitly state which files cannot introduce new requirements.",
+    "Do not include checklist tasks, API path details, DB table definitions, component names, or directory structures.",
+    "Keep naming and terms consistent with existing artifacts.",
     "",
     "Skill context:",
     clampText(skill, 2500),
   ].join("\n");
 }
-
-
-
-// SDD Input Snapshot
-export interface SddInputSnapshot {
-  requirement: string;
-  approvedSummary: string;
-  evidence: string; // 01~07 content combined
-  qa: string;
-  skill: string;
-  files: {
-    "02": string;
-    "03": string;
-    "04": string;
-    "05"?: string;
-    "06"?: string;
-  };
-}
-
-async function buildSddInputSnapshot(meta: FileRunMeta, approvedSummary: string, fallbackContextOnly: boolean): Promise<SddInputSnapshot> {
-  const [skill, qa, evidence, file02, file03, file04, file05, file06] = await Promise.all([
-    loadSkillContext(meta.workspacePath),
-    Promise.resolve(buildQASnapshot(meta)),
-    loadSddEvidence(meta),
-    readFileBody(meta.workspacePath, meta.runId, "02").catch(() => ""),
-    readFileBody(meta.workspacePath, meta.runId, "03").catch(() => ""),
-    readFileBody(meta.workspacePath, meta.runId, "04").catch(() => ""),
-    readFileBody(meta.workspacePath, meta.runId, "05").catch(() => ""),
-    readFileBody(meta.workspacePath, meta.runId, "06").catch(() => ""),
-  ]);
-
-  const requirement = fallbackContextOnly ? clampText(meta.requirement, 6000) : clampText(meta.requirement, FILEWISE_CONTEXT_LIMIT);
-
-  return {
-    requirement,
-    approvedSummary,
-    evidence,
-    qa,
-    skill,
-    files: {
-      "02": file02,
-      "03": file03,
-      "04": file04,
-      "05": file05,
-      "06": file06,
-    }
-  };
-}
-
 export async function generateArtifactByLlm(
   meta: FileRunMeta,
   fileId: ArtifactFileId,
@@ -1129,17 +1036,17 @@ export async function generateArtifactByLlm(
     extraPrompt = "\nMINIMALIST MODE: Output ONLY the core structure, bullet points, and basic outlines. DO NOT include detailed explanations or long texts. Keep it as short as possible while preserving the structure.";
   } else {
     if (fileId === "01") {
-      extraPrompt = "\nDo not output bloated Mermaid diagrams. Structure the document as a strict three-part format: 1. Business Rules (业务规则), 2. Interface Mapping (接口映射, e.g., describing operations functionally like CreateUser without inventing REST paths), 3. Acceptance Criteria (验收标准). DO NOT invent specific RESTful API paths (e.g. /api/v1/xxx). Specific API paths and methods are strictly reserved for 04.";
+      extraPrompt = "\nOnly output: goal, scope, user roles, core scenarios, and explicit out-of-scope items.";
     } else if (fileId === "02") {
-      extraPrompt = "\nForce output complete MySQL DDL table creation statements, including PK, FK, indexes (uk_, idx_) and business constraints.";
+      extraPrompt = "\nOnly output domain terms, definitions, field meaning, status words, and business terminology.";
     } else if (fileId === "03") {
-      extraPrompt = "\nForce output Mermaid stateDiagram-v2 format. Keep ONLY: state sets, transition conditions, and forbidden transitions. DO NOT invent roles or features (e.g. Admin disable/enable) that are not strictly present in the requirements. Use strict unidirectional transitions (-->) only, never use <--> or bidirectional symbols. Ensure state names and transition descriptions are logically consistent.";
+      extraPrompt = "\nOnly output behavior rules, state transitions, permission boundaries, and exception handling rules.";
     } else if (fileId === "04") {
-      extraPrompt = "\nForce output OpenAPI 3.0 YAML specification, including $ref definitions for request/response.";
+      extraPrompt = "\nOnly output capability intents such as create/query/review/export; do not write fixed REST paths.";
     } else if (fileId === "05") {
-      extraPrompt = "\nForce output pure HTML content. Keep only structure and key interactions, remove non-essential visual descriptions. DO NOT prefix or suffix the HTML with any markdown text or explanations. Start strictly with <!DOCTYPE html>.";
+      extraPrompt = "\nOnly output developer-agent execution order, reading order, free-design area, and mandatory constraints.";
     } else if (fileId === "06") {
-      extraPrompt = "\nForce output valid Postman Collection JSON. MUST strip any markdown wrapper (like ```json).";
+      extraPrompt = "\nOnly output acceptance criteria, test observation points, and completion judgment. Do not output test code.";
     }
   }
 
@@ -1156,7 +1063,7 @@ export async function generateArtifactByLlm(
       ? TASKS_NODE_SYSTEM_PROMPT
       : DETAILING_NODE_SYSTEM_PROMPT;
 
-  const systemPrompt = baseSystemPrompt + "\n\nYou are generating a single file. Output ONLY the raw markdown/yaml/html/json content. DO NOT wrap it in JSON or any code blocks. No explanations, no filler. Ensure cross-file naming consistency.";
+  const systemPrompt = baseSystemPrompt + "\n\nYou are generating a single file. Output ONLY the raw markdown content. DO NOT wrap it in JSON or any code blocks. No explanations, no filler. Ensure cross-file naming consistency.";
 
   const response = await model.invoke([
     new SystemMessage(systemPrompt),
@@ -1177,19 +1084,6 @@ export async function generateArtifactByLlm(
       }
       content = lines.join("\n").trim();
     }
-  }
-
-  // 针对 HTML 输出可能被 Markdown包裹的进一步清理
-  if (fileId === "05" && content.startsWith("<!DOCTYPE html>") && content.includes("```html")) {
-    content = content.replace(/```html/g, "").replace(/```/g, "").trim();
-  } else if (fileId === "05" && !content.startsWith("<!DOCTYPE html>") && content.includes("<!DOCTYPE html>")) {
-    const htmlStart = content.indexOf("<!DOCTYPE html>");
-    content = content.slice(htmlStart).replace(/```html/g, "").replace(/```/g, "").trim();
-  }
-
-  // 针对 06_API调试集合.json 被 Markdown包裹的清理
-  if (fileId === "06" && content.startsWith("```")) {
-    content = content.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
   }
 
   if (!content) {
@@ -1238,7 +1132,6 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
   const isMinimalist = attempt === 3;
 
   if (fileId === "07") {
-    // 增加前端进度提示
     await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
       logType: "INFO",
       title: "系统",
@@ -1249,58 +1142,28 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
       title: "系统",
       summary: "正在读取所有已生成的前置设计产物...",
     });
-    
-    // 我们不需要复杂的 SDD Snapshot 和 Constraints 提取逻辑，只需获取合并上下文
-    const snapshot = await buildSddInputSnapshot(meta, approvedSummary, isFallback);
-    
+
     await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
       logType: "INFO",
       title: "系统",
-      summary: "正在为您生成 Actionable Tasks (开发任务清单)...",
+      summary: "正在为您生成 SDD 约束总览...",
     });
     emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
       logType: "INFO",
       title: "系统",
-      summary: "正在为您生成 Actionable Tasks (开发任务清单)...",
+      summary: "正在为您生成 SDD 约束总览...",
     });
 
-    const model = createModel(meta, 45000);
-    const prompt = [
-      "你是一个专门为 AI Coding Agent (如 Trae, Cursor) 编写执行指令集的任务编排器。",
-      "你的任务是根据前置的架构设计文档，拆解出一份 **机器可读、指令明确的 Actionable Tasks 列表**。",
-      "要求：",
-      "1. 抛弃人类视角的冗长描述（不需要写为什么要做、怎么做），Agent 自己会去读 01-06 的文件上下文。",
-      "2. 任务必须直接转化为 Agent 可以执行的操作命令或文件读写动作。",
-      "3. 格式必须极其精简，每一项任务严格使用 Markdown Checkbox `- [ ]`，并直接点出要操作的文件和具体目标。",
-      "4. 分类例如：`## 1. Init Project`, `## 2. Database Schema`, `## 3. Backend APIs`, `## 4. Frontend Pages`。",
-      "5. **绝对禁止** 在开头或结尾输出任何寒暄、对话语（如“好的，作为任务编排器...”）。必须直接以第一行 Markdown 标题 `## ` 开头输出内容。",
-      "6. **接口级验收强制约束**：在 Backend APIs 任务分类下，每个接口的实现任务之后，必须紧跟具体的验收子任务。验收子任务必须明确指明：(a) 必填的请求/响应核心字段；(b) 特殊的错误码（如 401、403、429 等）及触发场景；(c) 鉴权失败或越权访问的具体边界行为。",
-      "",
-      "示例输出格式：",
-      "## 2. Database Schema",
-      "- [ ] 结合 02 文件，在 `src/db/schema.sql` 中生成建表语句。",
-      "- [ ] 结合 02 文件，在 `src/models/user.ts` 中生成 User 实体类。",
-      "",
-      "--- 前置设计文档 ---",
-      `需求草案：\n${snapshot.requirement}`,
-      `数据库设计：\n${snapshot.files["02"] || "无"}`,
-      `状态机设计：\n${snapshot.files["03"] || "无"}`,
-      `API 契约：\n${snapshot.files["04"] || "无"}`,
-      `前端结构：\n${snapshot.files["05"] || "无"}`,
-      `测试集合：\n${snapshot.files["06"] || "无"}`
-    ].join("\n");
-
-    const response = await model.invoke([
-      new HumanMessage(prompt),
-    ]);
-    
-    const text = typeof response.content === "string" ? response.content.trim() : "";
-    if (!text) {
-      throw new Error("任务清单正文为空");
-    }
+    const content = await generateArtifactByLlm(
+      meta,
+      "07",
+      approvedSummary,
+      isFallback,
+      isMinimalist,
+    );
 
     return {
-      content: text,
+      content,
       usedMcp: false,
       toolName: null,
       fallbackReason: null,
@@ -1547,12 +1410,12 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
         await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
-          summary: "正在落盘 Actionable Tasks 任务清单文件...",
+          summary: "正在落盘 SDD 约束总览文件...",
         });
         emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
-          summary: "正在落盘 Actionable Tasks 任务清单文件...",
+          summary: "正在落盘 SDD 约束总览文件...",
         });
       }
       await writeFileBody(meta.workspacePath, meta.runId, fileId, generated.content);
@@ -1561,18 +1424,15 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
       await validateApiConsistency(meta, fileId, generated.content);
 
       if (fileId === "07") {
-        // SDD Diagnostics/Gate logic has been completely removed in the new 07 Actionable Tasks workflow
-        // to embrace the lightweight and streamlined philosophy.
-        
         await appendEventLog(meta.workspacePath, meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
-          summary: "开发任务清单生成完毕，准备提交...",
+          summary: "SDD 约束总览生成完毕，准备提交...",
         });
         emitTaskScopedEvent(meta.runId, "LOG_ADDED", {
           logType: "INFO",
           title: "系统",
-          summary: "开发任务清单生成完毕，准备提交...",
+          summary: "SDD 约束总览生成完毕，准备提交...",
         });
       }
 
@@ -1622,7 +1482,7 @@ export async function filewiseGenerateCurrent(meta: FileRunMeta): Promise<FileRu
           lowered.includes("socket hang up");
         await appendEventLog(meta.workspacePath, meta.runId, "TASKS_FAILURE_SUMMARY", {
           fileId,
-          top3: message || "任务清单生成失败",
+          top3: message || "SDD约束总览生成失败",
           suggestion: networkLike
             ? "检查LLM baseUrl/apiKey与网络连通性后重试"
             : "查看FILE_FAILED与LLM响应详情后重试",

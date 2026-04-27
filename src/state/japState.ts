@@ -20,16 +20,16 @@ export const QuestionnaireSchema = z.object({
 });
 
 export const ModelingOutputSchema = z.object({
-  "01_\u4ea7\u54c1\u529f\u80fd\u8111\u56fe\u4e0e\u7528\u4f8b.md": z.string(),
-  "02_\u9886\u57df\u6a21\u578b\u4e0e\u7269\u7406\u8868\u7ed3\u6784.md": z.string(),
-  "03_\u6838\u5fc3\u4e1a\u52a1\u72b6\u6001\u673a.md": z.string(),
-  "04_RESTful_API\u5951\u7ea6.yaml": z.string(),
+  "01_\u9700\u6c42\u7b80\u62a5.md": z.string(),
+  "02_\u9886\u57df\u8bcd\u5178.md": z.string(),
+  "03_\u884c\u4e3a\u89c4\u5219.md": z.string(),
+  "04_\u80fd\u529b\u610f\u56fe.md": z.string(),
 });
 
 export const DetailingOutputSchema = z.object({
-  "05_\u884c\u4e3a\u9a71\u52a8\u9a8c\u6536\u6d4b\u8bd5.md": z.string(),
-  "06_UI\u539f\u578b\u4e0e\u4ea4\u4e92\u8349\u56fe.html": z.string(),
-  "07_API\u8c03\u8bd5\u96c6\u5408.json": z.string(),
+  "05_Agent\u6267\u884c\u6307\u5357.md": z.string(),
+  "06_\u9a8c\u6536\u6e05\u5355.md": z.string(),
+  "07_SDD\u7ea6\u675f\u603b\u89c8.md": z.string(),
 });
 
 export interface JapState {

@@ -80,7 +80,7 @@
       <div class="bd workspace">
         <div><div class="kv"><span>状态</span><span id="workspaceStage">就绪</span></div><div class="kv"><span>进度</span><span id="workspaceProgressText">0%</span></div><div class="progress-track"><div id="workspaceProgressBar" class="progress-bar"></div></div></div>
         <div><div class="kv"><span>文件列表</span><span id="artifactCount">0 个</span></div><div id="fileTree" class="tree" style="min-height:300px;max-height:calc(100vh - 350px);">暂无生成文件</div></div>
-        <div><div class="kv"><span>工作目录</span><span id="workspacePathLabel">output</span></div><div id="workspaceStatus" style="font-size:13px;color:var(--muted);">未设置</div><div class="flex gap-2" style="margin-top:12px;flex-direction:column;gap:8px;"><button id="btnGenerateNext" class="btn btn-primary" style="width:100%;padding:12px;" onclick="filewiseGenerateNext()">生成下一步工件</button><button id="btnAutoRun" class="btn btn-light" style="width:100%;padding:12px;border-color:#a8c5ff;color:#2f5d9e;background:#f2f7ff;" onclick="toggleAutoRun()">一键自动流转 (免人工审核)</button><button class="btn btn-light" style="width:100%;padding:12px;" onclick="openTasksSourceModal()">导入前置设计直接生成 07</button></div></div>
+        <div><div class="kv"><span>工作目录</span><span id="workspacePathLabel">output</span></div><div id="workspaceStatus" style="font-size:13px;color:var(--muted);">未设置</div><div class="flex gap-2" style="margin-top:12px;flex-direction:column;gap:8px;"><button id="btnGenerateNext" class="btn btn-primary" style="width:100%;padding:12px;" onclick="filewiseGenerateNext()">生成执行约束文件</button><button id="btnAutoRun" class="btn btn-light" style="width:100%;padding:12px;border-color:#a8c5ff;color:#2f5d9e;background:#f2f7ff;" onclick="toggleAutoRun()">一键自动流转 (免人工审核)</button><button class="btn btn-light" style="width:100%;padding:12px;" onclick="openTasksSourceModal()">导入历史资料生成约束总览</button></div></div>
       </div>
     </aside>
   </section>
@@ -91,7 +91,7 @@
       <div class="modal-hd" style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--line);">
         <div style="display:flex; flex-direction:column;">
           <span style="font-size:16px; font-weight:600;">💬 沙盒模式 (AI Co-pilot)</span>
-          <span style="font-size:12px; color:var(--muted);">与 AI 结对构思，随时一键固化为需求草案</span>
+          <span style="font-size:12px; color:var(--muted);">与 AI 结对构思，随时生成 Agent 执行资料包</span>
         </div>
         <button class="btn btn-light" style="padding:4px 8px; font-size:12px;" onclick="closeChatModal()">X</button>
       </div>
@@ -102,7 +102,7 @@
         <textarea id="chatInput" class="field" style="min-height:80px; margin-bottom:12px;" placeholder="描述你的业务需求，按 Enter 发送..."></textarea>
         <div class="action-row" style="display:flex; gap:12px;">
           <button class="btn btn-light" style="flex:1; padding:10px;" onclick="sendChatMessage()">发送消息 (Chat)</button>
-          <button class="btn btn-primary" style="flex:1; padding:10px;" id="designBtn" onclick="startDesignOnly()">一键固化为需求草案 (01)</button>
+          <button class="btn btn-primary" style="flex:1; padding:10px;" id="designBtn" onclick="startDesignOnly()">生成 Agent 执行资料包</button>
         </div>
       </div>
     </div>
@@ -132,7 +132,7 @@
   <div id="questionnaireModal" class="modal"><div class="modal-card"><div class="modal-hd">需求澄清问卷</div><div class="modal-bd"><div id="questionProgress" style="font-size:13px;color:var(--muted);"></div><div id="questionTitle" style="font-size:16px;font-weight:600;"></div><div id="questionDimension" style="font-size:13px;color:#4f719f;"></div><div id="questionType" style="font-size:12px;color:#5a7aa7;"></div><div id="questionOptions"></div></div><div class="modal-ft"><button class="btn btn-light" id="prevQuestionBtn" onclick="prevQuestion()">上一题</button><button class="btn btn-light" id="nextQuestionBtn" onclick="nextQuestion()">下一题</button><button class="btn btn-primary" id="finishQuestionBtn" onclick="finishQuestionnaire(false)">完成问卷</button></div></div></div>
   <div id="finalizeModal" class="modal"><div class="modal-card"><div class="modal-hd">需求定稿确认</div><div class="modal-bd"><div style="font-size:13px;color:var(--muted);">系统已基于当前问卷与答案自动生成定稿。你可以直接修改后确认。</div><textarea id="finalRequirementEditor" class="field" style="min-height:280px;"></textarea></div><div class="modal-ft"><button class="btn btn-light" onclick="regenerateFinalRequirement()">重新生成</button><button class="btn btn-light" onclick="closeFinalizeModal()">取消</button><button class="btn btn-primary" onclick="confirmFinalRequirement()">确认并继续</button></div></div></div>
   <div id="historyModal" class="modal"><div class="modal-card history-modal-card"><div class="modal-hd">历史需求任务</div><div class="modal-bd"><div class="history-workspace"><input id="historyWorkspacePath" class="field" placeholder="选择包含 tasks/_draft 的目录" /><button class="btn btn-light" onclick="chooseHistoryWorkspaceFolder()">选择目录</button><button class="btn btn-light" onclick="loadHistoryList()">刷新</button></div><div class="history-layout"><div id="historyList" class="history-list"></div><div class="history-preview-wrap"><div id="historyTabs" class="history-tabs"></div><div id="historyPreview" class="history-preview"></div><div class="history-ft"><div id="historySelectionInfo" style="font-size:13px;color:var(--muted);">未选择历史任务</div><button id="historyContinueBtn" class="btn btn-primary" onclick="continueFromHistory()" disabled>基于此任务继续生成</button></div></div></div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeHistoryModal()">关闭</button></div></div></div>
-  <div id="tasksSourceModal" class="modal"><div class="modal-card history-modal-card"><div class="modal-hd">选择前置设计导入</div><div class="modal-bd"><div class="history-workspace"><input id="tasksSourceWorkspacePath" class="field" placeholder="选择包含 tasks 的目录" /><button class="btn btn-light" onclick="chooseTasksSourceWorkspaceFolder()">选择目录</button><button class="btn btn-light" onclick="loadTasksSourceRuns()">刷新</button></div><div id="tasksSourceList" class="history-list"></div><div id="tasksSourceInfo" style="font-size:13px;color:var(--muted);margin-top:8px;">未选择历史流程</div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeTasksSourceModal()">取消</button><button id="tasksSourceConfirmBtn" class="btn btn-primary" onclick="confirmGenerateTasksWithSource()" disabled>确认生成任务清单(Tasks)</button></div></div></div>
+  <div id="tasksSourceModal" class="modal"><div class="modal-card history-modal-card"><div class="modal-hd">选择历史资料导入</div><div class="modal-bd"><div class="history-workspace"><input id="tasksSourceWorkspacePath" class="field" placeholder="选择包含 tasks 的目录" /><button class="btn btn-light" onclick="chooseTasksSourceWorkspaceFolder()">选择目录</button><button class="btn btn-light" onclick="loadTasksSourceRuns()">刷新</button></div><div id="tasksSourceList" class="history-list"></div><div id="tasksSourceInfo" style="font-size:13px;color:var(--muted);margin-top:8px;">未选择历史流程</div></div><div class="modal-ft"><button class="btn btn-light" onclick="closeTasksSourceModal()">取消</button><button id="tasksSourceConfirmBtn" class="btn btn-primary" onclick="confirmGenerateTasksWithSource()" disabled>确认生成 SDD 约束总览</button></div></div></div>
 
   <!-- A la Carte Design Dialog -->
   <div id="moduleSelectionModal" class="modal">
@@ -140,42 +140,42 @@
       <div class="modal-hd">架构选配模块 (A la Carte Design)</div>
       <div class="modal-bd">
         <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
-          需求草案 (01) 已通过！请按需勾选你要生成的后续设计模块。系统将并发生成以节省时间。
+          需求简报 (01) 已通过！请按需勾选你要生成的后续执行资料模块。系统将并发生成以节省时间。
         </p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <label class="toggle-card">
             <input type="checkbox" id="mod02" value="02" checked disabled>
             <div class="toggle-card-content" style="opacity:0.8;cursor:not-allowed;">
-              <span class="toggle-title">02_数据库结构 <span style="font-size:12px;color:var(--red);font-weight:normal;">(必选)</span></span>
-              <span class="toggle-desc">表结构、关联与索引设计</span>
+              <span class="toggle-title">02_领域词典 <span style="font-size:12px;color:var(--red);font-weight:normal;">(必选)</span></span>
+              <span class="toggle-desc">术语定义、字段语义、状态词约束</span>
             </div>
           </label>
           <label class="toggle-card">
             <input type="checkbox" id="mod03" value="03" checked>
             <div class="toggle-card-content">
-              <span class="toggle-title">03_状态机</span>
-              <span class="toggle-desc">核心业务状态迁移逻辑</span>
+              <span class="toggle-title">03_行为规则</span>
+              <span class="toggle-desc">业务规则、权限边界、异常场景</span>
             </div>
           </label>
           <label class="toggle-card">
             <input type="checkbox" id="mod04" value="04" checked disabled>
             <div class="toggle-card-content" style="opacity:0.8;cursor:not-allowed;">
-              <span class="toggle-title">04_API接口 <span style="font-size:12px;color:var(--red);font-weight:normal;">(必选)</span></span>
-              <span class="toggle-desc">RESTful API 契约与出入参</span>
+              <span class="toggle-title">04_能力意图 <span style="font-size:12px;color:var(--red);font-weight:normal;">(必选)</span></span>
+              <span class="toggle-desc">系统能力范围与边界，不写死接口路径</span>
             </div>
           </label>
           <label class="toggle-card">
             <input type="checkbox" id="mod05" value="05" checked>
             <div class="toggle-card-content">
-              <span class="toggle-title">05_前端页面</span>
-              <span class="toggle-desc">页面与组件树结构设计</span>
+              <span class="toggle-title">05_Agent执行指南</span>
+              <span class="toggle-desc">开发 Agent 执行顺序与强约束</span>
             </div>
           </label>
           <label class="toggle-card" style="grid-column:span 2;">
             <input type="checkbox" id="mod06" value="06" checked>
             <div class="toggle-card-content">
-              <span class="toggle-title">06_API调试集合</span>
-              <span class="toggle-desc">自动生成供 Postman 等工具导入的测试集合</span>
+              <span class="toggle-title">06_验收清单</span>
+              <span class="toggle-desc">验收条件、观察点与完成判断</span>
             </div>
           </label>
         </div>

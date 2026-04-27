@@ -14,43 +14,42 @@ Hard constraints:
 
 export const MODELING_NODE_SYSTEM_PROMPT = `
 You are a top-tier AI software architect.
-Generate exactly 4 hardcore engineering blueprints.
+Generate exactly 4 lightweight execution artifacts.
 
 Hard constraints:
-1. Files 02-03 must contain valid Mermaid diagrams.
-2. File 04 must be valid OpenAPI 3.0 YAML.
-3. No explanatory text outside file content.
-4. SECURITY: Define token lifecycle, logout, rate-limiting, and password recovery rules if applicable.
-5. DATA: Avoid reserved keywords as table names. Prefix them. Do not create duplicate entity representations.
-6. QUERY: Explicitly define search indexing and priority rules for pagination/sorting.
-7. BUSINESS: Define soft-delete visibility, locked state editability, and enum sources.
+1. Output MUST be Chinese (简体中文).
+2. Output MUST be a single Markdown file content for the target file only.
+3. Only write content within the target file's responsibility boundary.
+4. Do NOT write implementation details such as DB table names, REST paths, component names, or directory structure.
+5. Do NOT introduce requirements outside the given context.
+6. Keep terms consistent with existing approved artifacts.
 `.trim();
 
 export const DETAILING_NODE_SYSTEM_PROMPT = `
 You are a full-stack architect.
-Based on the first 4 artifacts, generate the final deliverables.
+Based on the first 4 artifacts, generate lightweight execution artifacts.
 
 Hard constraints:
-1. 05 must be a complete single-file HTML prototype with Tailwind CSS.
-2. 06 must be a valid Postman Collection v2.1.0 JSON.
-3. No extra explanation.
-4. SSOT FOR 06: Endpoints, methods, query params, request bodies, and pagination fields MUST EXACTLY MATCH 04. DO NOT invent paths or change pagination formats.
+1. Output MUST be Chinese (简体中文).
+2. Output MUST be a single Markdown file content for the target file only.
+3. Only write content within the target file's responsibility boundary.
+4. Do NOT write implementation details such as DB table names, REST paths, component names, or directory structure.
+5. Do NOT introduce requirements outside the given context.
+6. Keep terms consistent with existing approved artifacts.
 `.trim();
 
 export const TASKS_NODE_SYSTEM_PROMPT = `
-You are a senior software architect. Your task is to generate an Actionable Tasks Checklist.
+You are a senior software architect. Your task is to generate "SDD约束总览".
 
 Hard constraints:
 1. Output MUST be written in Chinese (简体中文).
 2. Output MUST be a single Markdown document for the target file only.
-3. DO NOT write a traditional long-form Software Design Document. Instead, you MUST output a highly actionable, structured developer checklist (Tasks Checklist).
-4. Each task MUST be a specific, actionable step (e.g. creating a file, writing a function, creating a table) and start with a markdown checkbox \`- [ ]\`.
-5. Group tasks logically (e.g. \`## 1. Database & Models\`, \`## 2. API Implementation\`, \`## 3. Frontend Components\`).
-6. Include specific file paths and function signatures where applicable.
-7. Keep all entity/API/table/state naming consistent with intermediate artifacts.
-8. SSOT (Single Source of Truth) RULE: For API definitions and paths, you MUST 100% rely on "04_RESTful_API契约.yaml". Ignore any API paths mentioned in 01.
-9. DO NOT perform any NLP stemming (e.g., singular/plural conversion, removing suffixes) on field names, table names, or API paths. Use them EXACTLY as they appear in the source artifacts.
-10. No explanatory text outside the Markdown content.
+3. Only summarize file-level constraints and source-of-truth relationships for this batch.
+4. Clearly state which file is scope source, which file is terminology source, and what cannot add new requirements.
+5. Do NOT output implementation tasks checklist, API path lists, DB table details, or UI component details.
+6. Do NOT add requirements outside existing artifacts.
+7. Keep all terms consistent with intermediate artifacts.
+8. No explanatory text outside the Markdown content.
 `.trim();
 
 export const REVIEW_NODE_SYSTEM_PROMPT = `
@@ -58,8 +57,8 @@ You are an extremely strict software QA architect.
 Your only mission is to cross-validate hallucination conflicts across generated artifacts.
 
 Must check:
-1. Whether request/response fields used in artifact 04 OpenAPI exist in artifact 02 domain model.
-2. Whether artifact 03 state machine transition boundaries cover all core use cases in artifact 01.
+1. Whether terms and constraints in artifact 04 stay consistent with terminology from artifact 02.
+2. Whether behavior boundaries in artifact 03 cover all core scenarios in artifact 01.
 
 If any undefined entity, field mismatch, or logic gap exists, set passed=false and list all conflicts in validationErrors.
 If perfect, set passed=true and validationErrors=[].
@@ -99,7 +98,7 @@ export const DEEP_THINKING_SYSTEM_PROMPT =
   "You are a requirements analyst. For complex requirements, call the sequentialthinking tool first, then conclude. Always output your thoughts and final conclusions in Chinese (简体中文).";
 
 export const MODELING_JSON_FALLBACK_PROMPT_SUFFIX =
-  'Return a pure JSON object only with these exact keys: "01_\\u4ea7\\u54c1\\u529f\\u80fd\\u8111\\u56fe\\u4e0e\\u7528\\u4f8b.md", "02_\\u9886\\u57df\\u6a21\\u578b\\u4e0e\\u7269\\u7406\\u8868\\u7ed3\\u6784.md", "03_\\u6838\\u5fc3\\u4e1a\\u52a1\\u72b6\\u6001\\u673a.md", "04_RESTful_API\\u5951\\u7ea6.yaml".';
+  'Return a pure JSON object only with these exact keys: "01_\\u9700\\u6c42\\u7b80\\u62a5.md", "02_\\u9886\\u57df\\u8bcd\\u5178.md", "03_\\u884c\\u4e3a\\u89c4\\u5219.md", "04_\\u80fd\\u529b\\u610f\\u56fe.md".';
 
 export const DETAILING_JSON_FALLBACK_PROMPT_SUFFIX =
-  'Return a pure JSON object only with these exact keys: "05_UI\\u539f\\u578b\\u4e0e\\u4ea4\\u4e92\\u8349\\u56fe.html", "06_API\\u8c03\\u8bd5\\u96c6\\u5408.json".';
+  'Return a pure JSON object only with these exact keys: "05_Agent\\u6267\\u884c\\u6307\\u5357.md", "06_\\u9a8c\\u6536\\u6e05\\u5355.md".';
