@@ -12,7 +12,7 @@
 <body>
   <header class="topbar">
     <div class="topbar-left"><div class="brand">J</div><div class="topbar-brand-text"><div class="topbar-title">J-Architect-Pilot</div><div class="topbar-sub">2026 工业级</div></div></div>
-    <div class="topbar-right"><span id="llmChip" class="chip red">LLM: not configured</span><span id="wsChip" class="chip green">WebSocket: disconnected</span><span class="chip topbar-task">任务 #<span id="currentTaskId">--</span></span><span class="chip topbar-task">来源 #<span id="sourceTaskId">--</span></span><button class="gear" onclick="openSettings()">⚙</button></div>
+    <div class="topbar-right"><span id="llmChip" class="chip red">LLM: not configured</span><span id="wsChip" class="chip green">WebSocket: disconnected</span><span class="chip topbar-task">任务 #<span id="currentTaskId">--</span></span><span class="chip topbar-task">来源 #<span id="sourceTaskId">--</span></span><button class="btn btn-light" style="padding:6px 10px;font-size:12px;" onclick="openRagPanel()">知识库</button><button class="gear" onclick="openSettings()">⚙</button></div>
   </header>
 
   <section class="layout">
@@ -186,7 +186,21 @@
     </div>
   </div>
 
+  <div id="rag-panel" class="hidden fixed inset-y-0 right-0 w-96 bg-white shadow-xl z-50 flex flex-col">
+    <div class="flex items-center justify-between p-3 border-b">
+      <h3 class="text-sm font-semibold">知识库管理</h3>
+      <button onclick="RAG_PANEL.close()" class="text-gray-400 hover:text-gray-600">&times;</button>
+    </div>
+    <div class="p-2 border-b">
+      <button class="w-full px-3 py-1.5 bg-blue-500 text-white text-sm rounded" data-rag-action="create-kb">+ 新建知识库</button>
+    </div>
+    <div id="rag-kb-list" class="flex-1 overflow-y-auto p-2"></div>
+    <div id="rag-kb-detail" class="border-t bg-gray-50"></div>
+  </div>
+
   <script src="/js/state.js"></script>
+  <script src="/js/ragPanel.js"></script>
+  <script src="/js/ragCoordinator.js"></script>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>
