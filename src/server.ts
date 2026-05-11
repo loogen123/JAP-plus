@@ -7,6 +7,7 @@ import { registerConfigRoutes } from "./http/configRoutes.js";
 import { registerTaskRoutes } from "./http/taskRoutes.js";
 import { registerElicitationRoutes } from "./http/elicitationRoutes.js";
 import { registerWorkflowWebSocket } from "./http/websocket.js";
+import { registerRagRoutes } from "./http/ragRoutes.js";
 
 const app = express();
 
@@ -18,7 +19,9 @@ const wss = registerWorkflowWebSocket(server);
 
 registerTaskRoutes(app, wss);
 registerElicitationRoutes(app, wss);
-registerConfigRoutes(app);const port = Number(process.env.PORT || 8080);
+registerConfigRoutes(app);
+registerRagRoutes(app);
+const port = Number(process.env.PORT || 8080);
 server.listen(port, () => {
   console.log(`J-AP Plus web server running at http://localhost:${port}`);
 });

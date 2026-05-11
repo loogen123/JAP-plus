@@ -57,6 +57,7 @@ export type FileRunMeta = {
     apiKey: string;
     modelName: string;
   };
+  ragKbId?: string;
   workspacePath: string;
   selectedModules?: string[];
   status: "RUNNING" | "DONE" | "FAILED";

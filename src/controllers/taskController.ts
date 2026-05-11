@@ -36,6 +36,7 @@ import {
 import { emitTaskScopedEvent } from "../runtime/workflowEvents.js";
 import { ARTIFACT_FILES } from "../constants/domainConstants.js";
 import { appendRunEvent, log } from "../utils/logger.js";
+import { getKnowledgeBase } from "../rag/index.js";
 
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
@@ -321,11 +322,21 @@ export class TaskController {
     const selectedModules = Array.isArray(req.body?.selectedModules)
       ? req.body.selectedModules.filter((item: unknown): item is string => typeof item === "string")
       : undefined;
+    const ragKbId = typeof req.body?.ragKbId === "string" && req.body.ragKbId.trim()
+      ? req.body.ragKbId.trim()
+      : undefined;
     if (!requirement) {
       res.status(400).json({ message: "requirement is required" });
       return;
     }
     try {
+      if (ragKbId) {
+        const kb = await getKnowledgeBase(ragKbId);
+        if (!kb) {
+          res.status(400).json({ message: "invalid ragKbId" });
+          return;
+        }
+      }
       const { meta, resumed } = await createOrResumeFilewiseRun({
         runId,
         requirement,
@@ -334,6 +345,7 @@ export class TaskController {
         questionnaire,
         userAnswers,
         selectedModules,
+        ragKbId,
       });
       res.json({
         runId: meta.runId,
@@ -341,6 +353,37 @@ export class TaskController {
         currentFile: meta.currentFile,
         resumed,
       });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message });
+    }
+  }
+
+  async bindRagKnowledgeBase(req: Request, res: Response) {
+    const runId = String(req.params.runId ?? "").trim();
+    const workspacePath = resolveWorkspacePath(req.body?.workspace ?? req.query.workspace ?? req.query.workspacePath);
+    const ragKbId = typeof req.body?.ragKbId === "string" && req.body.ragKbId.trim()
+      ? req.body.ragKbId.trim()
+      : undefined;
+    if (!runId) {
+      res.status(400).json({ message: "runId is required" });
+      return;
+    }
+    try {
+      if (ragKbId) {
+        const kb = await getKnowledgeBase(ragKbId);
+        if (!kb) {
+          res.status(400).json({ message: "invalid ragKbId" });
+          return;
+        }
+      }
+      await withRunLock(runId, async () => {
+        const meta = await readMeta(workspacePath, runId);
+        meta.ragKbId = ragKbId;
+        await saveMeta(meta);
+      });
+      const refreshed = await readMeta(workspacePath, runId);
+      res.json(toFileStatusResponse(refreshed, workspacePath));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message });
@@ -900,4 +943,3 @@ export class TaskController {
     }
   }
 }
-

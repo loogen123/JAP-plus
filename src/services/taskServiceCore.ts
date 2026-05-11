@@ -689,13 +689,48 @@ export async function tryGenerateWithMcp(
   }
 }
 
+async function withRagRequirement(meta: FileRunMeta): Promise<FileRunMeta> {
+  const kbId = meta.ragKbId;
+  if (!kbId) {
+    return meta;
+  }
+  try {
+    const { RAGService, getKnowledgeBase } = await import("../rag/index.js");
+    const kb = await getKnowledgeBase(kbId);
+    if (!kb) {
+      return meta;
+    }
+    const service = new RAGService();
+    const ctx = await service.retrieveAndBuild(
+      meta.requirement,
+      kbId,
+      {
+        baseURL: meta.llm.baseUrl,
+        apiKey: meta.llm.apiKey,
+      },
+      kb.name,
+    );
+    if (!ctx.injectedPrompt.trim()) {
+      return meta;
+    }
+    return {
+      ...meta,
+      requirement: `${meta.requirement}\n${ctx.injectedPrompt}`,
+    };
+  } catch (error) {
+    await appendRunLog(meta, `[RAG] retrieve failed: ${String(error)}`);
+    return meta;
+  }
+}
+
 export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId, attempt: number): Promise<{
   content: string;
   usedMcp: boolean;
   toolName: string | null;
   fallbackReason: string | null;
 }> {
-  const approvedSummary = await loadApprovedArtifactSummary(meta);
+  const generationMeta = await withRagRequirement(meta);
+  const approvedSummary = await loadApprovedArtifactSummary(generationMeta);
   const isFallback = attempt >= 2;
   const isMinimalist = attempt === 3;
 
@@ -715,7 +750,7 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
     });
 
     const content = await generateArtifactByLlm(
-      meta,
+      generationMeta,
       "07",
       approvedSummary,
       isFallback,
@@ -731,7 +766,7 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
   }
   
   if (attempt === 1) {
-    const mcpResult = await tryGenerateWithMcp(meta, fileId, approvedSummary);
+    const mcpResult = await tryGenerateWithMcp(generationMeta, fileId, approvedSummary);
     if (mcpResult) {
       return {
         content: mcpResult.content,
@@ -745,8 +780,8 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
   const asArtifact = fileId as ArtifactFileId;
 
   try {
-    const content = await generateArtifactByLlm(
-      meta,
+      const content = await generateArtifactByLlm(
+      generationMeta,
       asArtifact,
       approvedSummary,
       isFallback,
@@ -759,14 +794,14 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
       fallbackReason: isMinimalist ? "switched to minimalist mode" : (isFallback ? "switched to fallback context" : "MCP tool unavailable"),
     };
   } catch (error) {
-    const sections = splitRequirementBySections(meta.requirement);
+    const sections = splitRequirementBySections(generationMeta.requirement);
     if (sections.length <= 1) {
       throw error;
     }
     const chunks: string[] = [];
     for (const section of sections) {
       const patchMeta: FileRunMeta = {
-        ...meta,
+        ...generationMeta,
         requirement: section,
       };
       const partial = await generateArtifactByLlm(patchMeta, asArtifact, approvedSummary, true, isMinimalist);
@@ -1074,6 +1109,7 @@ export async function createFilewiseRun(params: {
   questionnaire: JapState["questionnaire"];
   userAnswers: Record<string, string | string[]>;
   selectedModules?: string[];
+  ragKbId?: string;
 }): Promise<FileRunMeta> {
   const workspacePath = resolveWorkspacePath(params.workspace);
   const taskRoot = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks"));
@@ -1097,6 +1133,7 @@ export async function createFilewiseRun(params: {
     questionnaire: params.questionnaire,
     userAnswers: params.userAnswers,
     llm,
+    ...(params.ragKbId ? { ragKbId: params.ragKbId } : {}),
     workspacePath,
     status: "RUNNING",
     files: createInitialFileStates(params.selectedModules),
@@ -1127,6 +1164,7 @@ export async function createOrResumeFilewiseRun(params: {
   questionnaire: JapState["questionnaire"];
   userAnswers: Record<string, string | string[]>;
   selectedModules?: string[];
+  ragKbId?: string;
 }): Promise<{ meta: FileRunMeta; resumed: boolean }> {
   const workspacePath = resolveWorkspacePath(params.workspace);
   if (params.runId && params.runId.trim()) {
@@ -1144,6 +1182,7 @@ export async function createOrResumeFilewiseRun(params: {
     questionnaire: params.questionnaire,
     userAnswers: params.userAnswers,
     ...(params.selectedModules ? { selectedModules: params.selectedModules } : {}),
+    ...(params.ragKbId ? { ragKbId: params.ragKbId } : {}),
   });
   return { meta, resumed: false };
 }
@@ -1182,4 +1221,3 @@ async function loadSddEvidence(meta: FileRunMeta): Promise<string> {
   }
   return blocks.join("\n");
 }
-
