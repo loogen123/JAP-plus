@@ -12,7 +12,7 @@ import { registerRagRoutes } from "./http/ragRoutes.js";
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "20mb" }));
 app.use(express.static(path.resolve(process.cwd(), "public")));
 const server = createServer(app);
 const wss = registerWorkflowWebSocket(server);
