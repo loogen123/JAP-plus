@@ -33,7 +33,13 @@ async function normalizeUploadFiles(
     if (!file || typeof file !== "object") {
       continue;
     }
-    const row = file as { filePath?: unknown; fileName?: unknown; content?: unknown };
+    const row = file as {
+      filePath?: unknown;
+      fileName?: unknown;
+      content?: unknown;
+      contentBase64?: unknown;
+      encoding?: unknown;
+    };
     const fileName = typeof row.fileName === "string" ? row.fileName.trim() : "";
     if (!fileName) {
       continue;
@@ -41,6 +47,17 @@ async function normalizeUploadFiles(
     if (typeof row.content === "string") {
       const targetPath = path.join(originalsDir, `${randomUUID()}-${fileName}`);
       await fs.writeFile(targetPath, row.content, "utf-8");
+      normalized.push({ fileName, filePath: targetPath });
+      continue;
+    }
+    if (
+      typeof row.contentBase64 === "string" &&
+      row.contentBase64.length > 0 &&
+      row.encoding === "base64"
+    ) {
+      const targetPath = path.join(originalsDir, `${randomUUID()}-${fileName}`);
+      const binary = Buffer.from(row.contentBase64, "base64");
+      await fs.writeFile(targetPath, binary);
       normalized.push({ fileName, filePath: targetPath });
       continue;
     }

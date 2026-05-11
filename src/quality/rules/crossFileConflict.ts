@@ -31,7 +31,7 @@ function runCrossFileConflict(params: GateCheckParams): GateCheckResult {
 
   return {
     passed: issues.length === 0,
-    severity: "warning",
+    severity: "error",
     issues,
   };
 }

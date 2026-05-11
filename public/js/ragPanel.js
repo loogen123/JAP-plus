@@ -122,9 +122,28 @@
         return;
       }
       const files = [];
+      const bufferToBase64 = (arrayBuffer) => {
+        const bytes = new Uint8Array(arrayBuffer);
+        const chunkSize = 0x8000;
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        return btoa(binary);
+      };
       for (const file of input.files) {
-        const content = await file.text();
-        files.push({ fileName: file.name, content });
+        const isBinary = /\.(pdf|docx)$/i.test(file.name);
+        if (isBinary) {
+          const arrayBuffer = await file.arrayBuffer();
+          files.push({
+            fileName: file.name,
+            contentBase64: bufferToBase64(arrayBuffer),
+            encoding: "base64",
+          });
+        } else {
+          const content = await file.text();
+          files.push({ fileName: file.name, content });
+        }
       }
       const data = await request(`/api/v1/rag/knowledge-bases/${state.selectedKbId}/documents`, {
         method: "POST",
