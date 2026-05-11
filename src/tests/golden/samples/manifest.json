@@ -1,0 +1,12 @@
+﻿{
+    "cases":  [
+                  "case-001-crud-manager",
+                  "case-002-product-admin",
+                  "case-003-approval-workflow",
+                  "case-004-sales-dashboard",
+                  "case-005-minimal-single-feature",
+                  "case-006-multi-role-permission",
+                  "case-007-expected-failure-conflict",
+                  "case-008-expected-failure-out-of-scope"
+              ]
+}

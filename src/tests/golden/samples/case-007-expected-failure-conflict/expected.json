@@ -1,0 +1,12 @@
+﻿{
+    "caseId":  "case-007-expected-failure-conflict",
+    "description":  "预期失败-需求冲突",
+    "checks":  [
+                   {
+                       "fileId":  "07",
+                       "mustContain":  [
+                                           "约束关系"
+                                       ]
+                   }
+               ]
+}

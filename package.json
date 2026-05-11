@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx src/server.ts"
+    "dev": "tsx src/server.ts",
+    "test": "vitest run",
+    "test:golden": "vitest run src/tests/golden"
   },
   "keywords": [],
   "author": "",
@@ -34,6 +36,7 @@
     "@types/yaml": "^1.9.6",
     "node-fetch": "^3.3.2",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^3.2.4"
   }
 }

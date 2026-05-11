@@ -1,38 +1,131 @@
 import type { Request, Response } from "express";
 import type { FileId } from "../services/taskService.js";
 import {
-  withRunLock,
   resolveWorkspacePath,
   listHistoryRecords,
   resolveHistoryRecord,
   readPreview,
   normalizeQuestionnaire,
   isStringOrStringArrayRecord,
-  createFilewiseRun,
-  readMeta,
-  getFileRuntimeRecord,
-  readFileBody,
-  toFileStatusResponse,
+  createOrResumeFilewiseRun,
   filewiseGenerateCurrent,
   filewiseGeneratePendingBaseFiles,
+  listSddSourceRuns,
+} from "../services/taskService.js";
+import {
+  withRunLock,
+  getFileRuntimeRecord,
+  toFileStatusResponse,
   ensureValidFileId,
   upsertFileState,
   resolveCurrentFile,
   deriveStageFromCurrentFile,
+} from "../pipeline/stateMachine.js";
+import {
+  readMeta,
   saveMeta,
-  appendEventLog,
-  writeFileBody,
-  listSddSourceRuns,
-  readRunEventsTail,
+} from "../persistence/metaStore.js";
+import {
   getRunLastEventAt,
-} from "../services/taskService.js";
+  readRunEventsTail,
+} from "../persistence/eventLog.js";
+import {
+  readFileBody,
+  writeFileBody,
+} from "../persistence/artifactStore.js";
 import { emitTaskScopedEvent } from "../runtime/workflowEvents.js";
 import { ARTIFACT_FILES } from "../constants/domainConstants.js";
+import { appendRunEvent, log } from "../utils/logger.js";
 
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
 
 export class TaskController {
+  private isBaseFilesApproved(meta: Awaited<ReturnType<typeof readMeta>>): boolean {
+    return meta.files.filter((f) => f.fileId !== "07").every((f) => f.status === "APPROVED");
+  }
+
+  private ensureSddFile(meta: Awaited<ReturnType<typeof readMeta>>): void {
+    if (!meta.files.find((f) => f.fileId === "07")) {
+      meta.files.push({
+        fileId: "07",
+        artifactName: ARTIFACT_FILES.sdd07,
+        status: "PENDING",
+        retries: 0,
+        lastError: null,
+        usedMcp: false,
+        toolName: null,
+        fallbackReason: null,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    meta.currentFile = "07";
+    meta.stage = "DETAILING";
+    upsertFileState(meta, "07", { status: "PENDING", lastError: null });
+  }
+
+  private applyLlmOverrides(meta: Awaited<ReturnType<typeof readMeta>>, llm: unknown): void {
+    const llmRaw = llm && typeof llm === "object" ? (llm as Record<string, unknown>) : {};
+    if (typeof llmRaw.baseUrl === "string" && llmRaw.baseUrl.trim()) {
+      meta.llm.baseUrl = llmRaw.baseUrl.trim();
+    }
+    if (typeof llmRaw.apiKey === "string" && llmRaw.apiKey.trim()) {
+      meta.llm.apiKey = llmRaw.apiKey.trim();
+    }
+    if (typeof llmRaw.modelName === "string" && llmRaw.modelName.trim()) {
+      meta.llm.modelName = llmRaw.modelName.trim();
+    }
+  }
+
+  private async generateSddCore(
+    workspacePath: string,
+    runId: string,
+    meta: Awaited<ReturnType<typeof readMeta>>,
+    options?: { appendAutoReviewLog?: boolean },
+  ): Promise<void> {
+    const runtime = getFileRuntimeRecord(meta);
+    if (!meta.currentFile) {
+      throw new Error("no current file to generate");
+    }
+    if (meta.currentFile !== "07") {
+      throw new Error("sdd generation only supports file 07");
+    }
+    if (!runtime.actions.canGenerateNext) {
+      throw new Error("file 07 is not ready for generation");
+    }
+    await filewiseGenerateCurrent(meta);
+    let refreshed = await readMeta(workspacePath, runId);
+    const sddFile = refreshed.files.find((item) => item.fileId === "07");
+    if (!sddFile || (sddFile.status !== "GENERATED" && sddFile.status !== "REVIEWING")) {
+      return;
+    }
+    upsertFileState(refreshed, "07", { status: "APPROVED", lastError: null });
+    const nextFile = resolveCurrentFile(refreshed.files);
+    refreshed.currentFile = nextFile;
+    refreshed.stage = deriveStageFromCurrentFile(nextFile);
+    refreshed.status = nextFile ? "RUNNING" : "DONE";
+    await saveMeta(refreshed);
+    emitTaskScopedEvent(runId, "FILE_APPROVED", { runId, fileId: "07", status: "APPROVED" });
+    emitTaskScopedEvent(runId, "RUN_POINTER_MOVED", { runId, stage: refreshed.stage, currentFile: refreshed.currentFile });
+    if (refreshed.status === "DONE") {
+      emitTaskScopedEvent(runId, "TASK_FINISHED", { runId, status: "DONE" });
+    }
+    await appendRunEvent(workspacePath, runId, "FILE_APPROVED", { fileId: "07", auto: true });
+    if (options?.appendAutoReviewLog) {
+      await log(
+        {
+          run: runId,
+          file: "07",
+          stage: "DETAILING",
+          level: "info",
+          msg: "07 文件已生成并通过自动审核",
+          extra: { auto: true },
+        },
+        async (type, data) => appendRunEvent(workspacePath, runId, type, data),
+      );
+    }
+  }
+
   private inferSddErrorCode(message: string): string {
     const lowered = message.toLowerCase();
     if (lowered.includes("econnrefused") || lowered.includes("socket hang up") || lowered.includes("timeout")) {
@@ -186,8 +279,8 @@ export class TaskController {
             "Keep your responses concise, actionable, and conversational. " +
             "CRITICAL: Ask ONLY ONE question at a time. Do not overwhelm the user with a list of questions. Wait for their answer before asking the next one. " +
             "Use Markdown formatting (like **bold**, lists, etc.) to make your output readable. " +
-            "Once you believe the requirements are clear enough to generate a formal design draft (01_需求草案), " +
-            "you should suggest the user click the '固化为草案 (Solidify to Draft)' button."
+            "Once you believe the requirements are clear enough to generate a formal design draft (01_需求草�?, " +
+            "you should suggest the user click the '固化为草�?(Solidify to Draft)' button."
           )
         );
       }
@@ -217,6 +310,7 @@ export class TaskController {
   }
 
   async startFilewiseTask(req: Request, res: Response) {
+    const runId = typeof req.body?.runId === "string" ? req.body.runId : undefined;
     const requirement = String(req.body?.requirement ?? "").trim();
     const llm = req.body?.llm ?? {};
     const workspace = req.body?.workspace ?? {};
@@ -224,22 +318,28 @@ export class TaskController {
     const userAnswers = isStringOrStringArrayRecord(req.body?.userAnswers)
       ? req.body.userAnswers
       : {};
+    const selectedModules = Array.isArray(req.body?.selectedModules)
+      ? req.body.selectedModules.filter((item: unknown): item is string => typeof item === "string")
+      : undefined;
     if (!requirement) {
       res.status(400).json({ message: "requirement is required" });
       return;
     }
     try {
-      const meta = await createFilewiseRun({
+      const { meta, resumed } = await createOrResumeFilewiseRun({
+        runId,
         requirement,
         llm,
         workspace,
         questionnaire,
         userAnswers,
+        selectedModules,
       });
       res.json({
         runId: meta.runId,
         stage: meta.stage,
         currentFile: meta.currentFile,
+        resumed,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -338,7 +438,7 @@ export class TaskController {
           if (!allowed.has(f.fileId)) {
             if (f.status === "PENDING" || f.status === "FAILED") {
               f.status = "REJECTED"; // "REJECTED" or "GENERATED" or we need to add "SKIPPED"? We can't easily add SKIPPED to the enum. 
-              // Wait, if we just remove them, the frontend will hide them. That is perfectly fine and matches "直接置灰或隐藏"!
+              // Wait, if we just remove them, the frontend will hide them. That is perfectly fine and matches "直接置灰或隐�?!
             }
           }
         }
@@ -489,75 +589,28 @@ export class TaskController {
         }
         
         if (sourceRunId) {
-          const baseFiles = meta.files.filter(f => f.fileId !== "07");
-          const baseReady = baseFiles.every((file) => {
-            return file.status === "APPROVED";
-          });
-          if (!baseReady) {
+          if (!this.isBaseFilesApproved(meta)) {
             res.status(409).json({ message: "历史任务未完成基础设计阶段审核通过，不能用于SDD生成" });
             return;
           }
-
-          // 兼容老版本的历史流程：如果历史流程里没有 07 文件，自动补齐
-          if (!meta.files.find(f => f.fileId === "07")) {
-            meta.files.push({
-              fileId: "07",
-              artifactName: ARTIFACT_FILES.sdd07,
-              status: "PENDING",
-              retries: 0,
-              lastError: null,
-              usedMcp: false,
-              toolName: null,
-              fallbackReason: null,
-              updatedAt: new Date().toISOString(),
-            });
-          }
-
-          // 关键修复：强制将任务指针移动到 07，否则前端审批时会报 "only current file can be approved"
-          meta.currentFile = "07";
-          meta.stage = "DETAILING";
-
+          this.ensureSddFile(meta);
           meta.llm = currentMeta.llm;
-          upsertFileState(meta, "07", { status: "PENDING", lastError: null });
           await saveMeta(meta);
-          meta = await readMeta(workspacePath, targetRunId);
+          const freshMeta = await readMeta(workspacePath, targetRunId);
+          freshMeta.llm = meta.llm;
+          meta = freshMeta;
         }
         const runtime = getFileRuntimeRecord(meta);
-        if (!meta.currentFile) {
-          res.status(409).json({ message: "no current file to generate", ...toFileStatusResponse(meta, workspacePath) });
+        if (!meta.currentFile || meta.currentFile !== "07" || !runtime.actions.canGenerateNext) {
+          const message = !meta.currentFile
+            ? "no current file to generate"
+            : meta.currentFile !== "07"
+              ? "sdd generation only supports file 07"
+              : "file 07 is not ready for generation";
+          res.status(409).json({ message, ...toFileStatusResponse(meta, workspacePath) });
           return;
         }
-        if (meta.currentFile !== "07") {
-          res.status(409).json({ message: "sdd generation only supports file 07", ...toFileStatusResponse(meta, workspacePath) });
-          return;
-        }
-        if (!runtime.actions.canGenerateNext) {
-          res.status(409).json({ message: "file 07 is not ready for generation", ...toFileStatusResponse(meta, workspacePath) });
-          return;
-        }
-        await filewiseGenerateCurrent(meta);
-        let refreshed = await readMeta(workspacePath, targetRunId);
-        const sddFile = refreshed.files.find((item) => item.fileId === "07");
-        if (sddFile && (sddFile.status === "GENERATED" || sddFile.status === "REVIEWING")) {
-          upsertFileState(refreshed, "07", { status: "APPROVED", lastError: null });
-          
-          // 修正：推进 currentFile 和更新任务状态，避免前端死循环弹窗
-          const nextFile = resolveCurrentFile(refreshed.files);
-          refreshed.currentFile = nextFile;
-          refreshed.stage = deriveStageFromCurrentFile(nextFile);
-          refreshed.status = nextFile ? "RUNNING" : "DONE";
-
-          await saveMeta(refreshed);
-
-          // 推送实时 WebSocket 事件，保持前端状态机同步
-          emitTaskScopedEvent(targetRunId, "FILE_APPROVED", { runId: targetRunId, fileId: "07", status: "APPROVED" });
-          emitTaskScopedEvent(targetRunId, "RUN_POINTER_MOVED", { runId: targetRunId, stage: refreshed.stage, currentFile: refreshed.currentFile });
-          if (refreshed.status === "DONE") {
-            emitTaskScopedEvent(targetRunId, "TASK_FINISHED", { runId: targetRunId, status: "DONE" });
-          }
-
-          await appendEventLog(workspacePath, targetRunId, "FILE_APPROVED", { fileId: "07", auto: true });
-        }
+        await this.generateSddCore(workspacePath, targetRunId, meta);
       });
       if (res.headersSent) {
         return;
@@ -618,11 +671,7 @@ export class TaskController {
     try {
       await withRunLock(sourceRunId, async () => {
         const sourceMeta = await readMeta(workspacePath, sourceRunId);
-        const baseFiles = sourceMeta.files.filter(f => f.fileId !== "07");
-        const baseReady = baseFiles.every((file) => {
-          return file.status === "APPROVED";
-        });
-        if (!baseReady) {
+        if (!this.isBaseFilesApproved(sourceMeta)) {
           const payload = await this.buildSddErrorPayload(
             workspacePath,
             sourceRunId,
@@ -633,62 +682,12 @@ export class TaskController {
           res.status(409).json(payload);
           return;
         }
-        const llmRaw = llm && typeof llm === "object" ? (llm as Record<string, unknown>) : {};
-        if (typeof llmRaw.baseUrl === "string" && llmRaw.baseUrl.trim()) {
-          sourceMeta.llm.baseUrl = llmRaw.baseUrl.trim();
-        }
-        if (typeof llmRaw.apiKey === "string" && llmRaw.apiKey.trim()) {
-          sourceMeta.llm.apiKey = llmRaw.apiKey.trim();
-        }
-        if (typeof llmRaw.modelName === "string" && llmRaw.modelName.trim()) {
-          sourceMeta.llm.modelName = llmRaw.modelName.trim();
-        }
-        // 兼容老版本的历史流程：如果历史流程里没有 07 文件，自动补齐
-        if (!sourceMeta.files.find(f => f.fileId === "07")) {
-          sourceMeta.files.push({
-            fileId: "07",
-            artifactName: ARTIFACT_FILES.sdd07,
-            status: "PENDING",
-            retries: 0,
-            lastError: null,
-            usedMcp: false,
-            toolName: null,
-            fallbackReason: null,
-            updatedAt: new Date().toISOString(),
-          });
-        }
-
-        // 关键修复：强制将任务指针移动到 07，否则前端审批时会报 "only current file can be approved"
-        sourceMeta.currentFile = "07";
-        sourceMeta.stage = "DETAILING";
-        
-        upsertFileState(sourceMeta, "07", { status: "PENDING", lastError: null });
+        this.applyLlmOverrides(sourceMeta, llm);
+        this.ensureSddFile(sourceMeta);
         await saveMeta(sourceMeta);
         const ready = await readMeta(workspacePath, sourceRunId);
-        await filewiseGenerateCurrent(ready);
-        let refreshed = await readMeta(workspacePath, sourceRunId);
-        const sddFile = refreshed.files.find((item) => item.fileId === "07");
-        if (sddFile && (sddFile.status === "GENERATED" || sddFile.status === "REVIEWING")) {
-          upsertFileState(refreshed, "07", { status: "APPROVED", lastError: null });
-          
-          // 修正：推进 currentFile 和更新任务状态，避免前端死循环弹窗
-          const nextFile = resolveCurrentFile(refreshed.files);
-          refreshed.currentFile = nextFile;
-          refreshed.stage = deriveStageFromCurrentFile(nextFile);
-          refreshed.status = nextFile ? "RUNNING" : "DONE";
-
-          await saveMeta(refreshed);
-
-          // 推送实时 WebSocket 事件，保持前端状态机同步
-          emitTaskScopedEvent(sourceRunId, "FILE_APPROVED", { runId: sourceRunId, fileId: "07", status: "APPROVED" });
-          emitTaskScopedEvent(sourceRunId, "RUN_POINTER_MOVED", { runId: sourceRunId, stage: refreshed.stage, currentFile: refreshed.currentFile });
-          if (refreshed.status === "DONE") {
-            emitTaskScopedEvent(sourceRunId, "TASK_FINISHED", { runId: sourceRunId, status: "DONE" });
-          }
-
-          await appendEventLog(workspacePath, sourceRunId, "FILE_APPROVED", { fileId: "07", auto: true });
-          await appendEventLog(workspacePath, sourceRunId, "LOG_ADDED", { logType: "INFO", title: "系统", summary: "07 文件已生成并通过自动审核" });
-        }
+        ready.llm = sourceMeta.llm;
+        await this.generateSddCore(workspacePath, sourceRunId, ready, { appendAutoReviewLog: true });
       });
       if (res.headersSent) {
         return;
@@ -744,8 +743,8 @@ export class TaskController {
         if (meta.status === "DONE") {
           emitTaskScopedEvent(runId, "TASK_FINISHED", { runId, status: "DONE" });
         }
-        await appendEventLog(workspacePath, runId, "FILE_APPROVED", { fileId });
-        await appendEventLog(workspacePath, runId, "RUN_POINTER_MOVED", {
+        await appendRunEvent(workspacePath, runId, "FILE_APPROVED", { fileId });
+        await appendRunEvent(workspacePath, runId, "RUN_POINTER_MOVED", {
           currentFile: meta.currentFile,
           stage: meta.stage,
         });
@@ -787,7 +786,7 @@ export class TaskController {
         });
         await saveMeta(meta);
         emitTaskScopedEvent(runId, "FILE_REJECTED", { runId, fileId, status: "REJECTED", reason });
-        await appendEventLog(workspacePath, runId, "FILE_REJECTED", { fileId, reason });
+        await appendRunEvent(workspacePath, runId, "FILE_REJECTED", { fileId, reason });
       });
       if (res.headersSent) {
         return;
@@ -832,7 +831,7 @@ export class TaskController {
         upsertFileState(meta, fileId, { status: "PENDING", retries: current.retries + 1, lastError: null });
         await saveMeta(meta);
         emitTaskScopedEvent(runId, "FILE_REGENERATED", { runId, fileId, status: "PENDING" });
-        await appendEventLog(workspacePath, runId, "FILE_REGENERATED", { fileId, attempt: current.retries + 1 });
+        await appendRunEvent(workspacePath, runId, "FILE_REGENERATED", { fileId, attempt: current.retries + 1 });
         
         // Use filewiseGenerateCurrent to only generate THIS specific file
         // Note: we trick the system by passing the meta but setting currentFile to the file we want to generate
@@ -885,7 +884,7 @@ export class TaskController {
         upsertFileState(meta, fileId, { status: "REVIEWING", lastError: null });
         await saveMeta(meta);
         emitTaskScopedEvent(runId, "FILE_EDITED", { runId, fileId, status: "REVIEWING" });
-        await appendEventLog(workspacePath, runId, "FILE_EDITED", { fileId, size: content.length });
+        await appendRunEvent(workspacePath, runId, "FILE_EDITED", { fileId, size: content.length });
       });
       if (res.headersSent) {
         return;
@@ -901,3 +900,4 @@ export class TaskController {
     }
   }
 }
+

@@ -1,0 +1,60 @@
+﻿{
+    "caseId":  "case-003-approval-workflow",
+    "description":  "审批工作流",
+    "checks":  [
+                   {
+                       "fileId":  "01",
+                       "mustNotContain":  [
+                                              "REST API",
+                                              "数据库表",
+                                              "组件目录"
+                                          ],
+                       "mustContain":  [
+                                           "目标",
+                                           "范围",
+                                           "用户角色",
+                                           "核心场景"
+                                       ]
+                   },
+                   {
+                       "minTermCount":  3,
+                       "mustHaveTermCategories":  [
+                                                      "实体",
+                                                      "状态",
+                                                      "字段"
+                                                  ],
+                       "fileId":  "02"
+                   },
+                   {
+                       "fileId":  "04",
+                       "mustNotContain":  [
+                                              "POST /api",
+                                              "GET /api",
+                                              "/v1/"
+                                          ],
+                       "mustContain":  [
+                                           "创建",
+                                           "查询",
+                                           "更新",
+                                           "删除"
+                                       ]
+                   },
+                   {
+                       "fileId":  "06",
+                       "apiCountShouldMatch04":  true
+                   },
+                   {
+                       "fileId":  "07",
+                       "mustNotContain":  [
+                                              "任务清单",
+                                              "checkbox",
+                                              "- [ ]"
+                                          ],
+                       "mustContain":  [
+                                           "约束关系",
+                                           "术语源头",
+                                           "范围源头"
+                                       ]
+                   }
+               ]
+}

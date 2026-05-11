@@ -5,3 +5,7 @@ output/
 logs/
 .qoder/
 tasks/
+.claude/
+.trae/.ignore
+IMPROVEMENT_PLAN.md
+全链路执行过程.md

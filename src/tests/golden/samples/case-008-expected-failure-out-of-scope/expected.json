@@ -1,0 +1,13 @@
+﻿{
+    "caseId":  "case-008-expected-failure-out-of-scope",
+    "description":  "预期失败-超能力边界",
+    "checks":  [
+                   {
+                       "fileId":  "01",
+                       "mustNotContain":  [
+                                              "数据库表",
+                                              "schema"
+                                          ]
+                   }
+               ]
+}
