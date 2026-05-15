@@ -25,7 +25,13 @@ export type ChunkMeta = {
   chunkIndex: number;
   lineRange?: [number, number];
   tokenCount: number;
+  blockType?: ChunkBlockType;
+  path?: string[];
+  startOffset?: number;
+  endOffset?: number;
 };
+
+export type ChunkBlockType = "paragraph" | "list" | "table" | "code" | "quote";
 
 export type Chunk = {
   id: string;

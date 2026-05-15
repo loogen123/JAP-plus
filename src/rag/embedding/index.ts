@@ -2,19 +2,22 @@ import type { ApiConfig } from "../types.js";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const BATCH_SIZE = 20;
+const HASH_EMBEDDING_DIM = 256;
 
 type EmbedChunk = { id: string; content: string };
 type EmbedResult = Map<string, number[]>;
 
 export function tokenize(text: string): string[] {
   const tokens: string[] = [];
-  const segments = text.split(/\s+/g).filter(Boolean);
+  const segments = text.match(/[\u4e00-\u9fff]+|[a-zA-Z0-9_]+/g) ?? [];
   for (const segment of segments) {
-    if (/[一-龥]/.test(segment)) {
+    if (/^[\u4e00-\u9fff]+$/.test(segment)) {
+      tokens.push(segment);
       for (const char of segment) {
-        if (/[一-龥]/.test(char)) {
-          tokens.push(char);
-        }
+        tokens.push(char);
+      }
+      for (let i = 0; i < segment.length - 1; i += 1) {
+        tokens.push(segment.slice(i, i + 2));
       }
     } else {
       tokens.push(segment.toLowerCase());
@@ -46,37 +49,38 @@ function computeTfIdfVector(tf: Map<string, number>, idf: Map<string, number>, t
   return terms.map((term) => (tf.get(term) ?? 0) * (idf.get(term) ?? 0));
 }
 
-export function embedWithTfIdf(chunks: EmbedChunk[]): EmbedResult {
+function hashToken(token: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < token.length; i += 1) {
+    hash ^= token.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function normalizeVector(vector: number[]): number[] {
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  if (norm === 0) {
+    return vector;
+  }
+  return vector.map((value) => value / norm);
+}
+
+export function embedWithHashing(chunks: EmbedChunk[], dimension: number = HASH_EMBEDDING_DIM): EmbedResult {
   const result: EmbedResult = new Map();
   if (chunks.length === 0) {
     return result;
   }
-  const df = new Map<string, number>();
-  const docsTf: Map<string, number>[] = [];
   for (const chunk of chunks) {
     const tokens = tokenize(chunk.content);
-    const tf = new Map<string, number>();
+    const vector = new Array(dimension).fill(0);
     for (const token of tokens) {
-      tf.set(token, (tf.get(token) ?? 0) + 1);
+      const hash = hashToken(token);
+      const index = hash % dimension;
+      const sign = (hash & 1) === 0 ? 1 : -1;
+      vector[index] += sign;
     }
-    docsTf.push(tf);
-    for (const token of new Set(tokens)) {
-      df.set(token, (df.get(token) ?? 0) + 1);
-    }
-  }
-  const terms = [...df.keys()];
-  const docCount = chunks.length;
-  const idf = new Map<string, number>();
-  for (const term of terms) {
-    idf.set(term, Math.log((docCount + 1) / ((df.get(term) ?? 0) + 1)) + 1);
-  }
-  for (let i = 0; i < chunks.length; i += 1) {
-    const chunk = chunks[i];
-    const tf = docsTf[i];
-    if (!chunk || !tf) {
-      continue;
-    }
-    result.set(chunk.id, computeTfIdfVector(tf, idf, terms));
+    result.set(chunk.id, normalizeVector(vector));
   }
   return result;
 }
@@ -87,7 +91,7 @@ export async function embedChunks(chunks: EmbedChunk[], apiConfig: ApiConfig): P
     return result;
   }
   if (!apiConfig.apiKey || !apiConfig.baseURL) {
-    return embedWithTfIdf(chunks);
+    return embedWithHashing(chunks);
   }
   try {
     const model = apiConfig.model ?? EMBEDDING_MODEL;
@@ -119,8 +123,8 @@ export async function embedChunks(chunks: EmbedChunk[], apiConfig: ApiConfig): P
     if (result.size === chunks.length) {
       return result;
     }
-    return embedWithTfIdf(chunks);
+    return embedWithHashing(chunks);
   } catch {
-    return embedWithTfIdf(chunks);
+    return embedWithHashing(chunks);
   }
 }

@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { ApiConfig, RetrievalResult, RetrieveOptions } from "../types.js";
-import { embedChunks } from "../embedding/index.js";
+import { cosineSimilarity, embedChunks, embedWithHashing } from "../embedding/index.js";
 import { createVectorStore, type VectorStore } from "../vectorStore/index.js";
 import { keywordSearch } from "./hybridSearch.js";
 import { mmrRerank, rrfFuse } from "./reranker.js";
@@ -22,6 +22,50 @@ async function getStore(kbId: string): Promise<VectorStore> {
   return store;
 }
 
+function hasConsistentEmbeddingDimensions(chunks: { embedding: number[] }[]): number | null {
+  let dimension: number | null = null;
+  for (const chunk of chunks) {
+    if (!Array.isArray(chunk.embedding) || chunk.embedding.length === 0) {
+      return null;
+    }
+    if (dimension === null) {
+      dimension = chunk.embedding.length;
+      continue;
+    }
+    if (dimension !== chunk.embedding.length) {
+      return null;
+    }
+  }
+  return dimension;
+}
+
+async function localSemanticSearch(
+  query: string,
+  chunks: Awaited<ReturnType<VectorStore["listChunks"]>>,
+  topK: number,
+): Promise<RetrievalResult[]> {
+  const queryVector = embedWithHashing([{ id: "__query__", content: query }]).get("__query__") ?? [];
+  return chunks
+    .map((chunk) => {
+      const section = chunk.metadata.sectionTitle ? ` > ${chunk.metadata.sectionTitle}` : "";
+      const embedding = embedWithHashing([{ id: chunk.id, content: chunk.content }]).get(chunk.id) ?? [];
+      return {
+        chunk: {
+          ...chunk,
+          embedding,
+        },
+        score: cosineSimilarity(queryVector, embedding),
+        source: `${chunk.metadata.docFileName}${section}`,
+      } satisfies RetrievalResult;
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+}
+
+export function takeTopResults(results: RetrievalResult[], topK: number): RetrievalResult[] {
+  return results.slice(0, topK);
+}
+
 export async function retrieve(
   query: string,
   kbId: string,
@@ -35,13 +79,17 @@ export async function retrieve(
   if (stats.chunkCount === 0) {
     return [];
   }
-  const queryEmbedding = await embedChunks([{ id: "__query__", content: query }], apiConfig);
-  const queryVector = queryEmbedding.get("__query__");
-  if (!queryVector) {
-    return [];
-  }
-  const semanticResults = await store.search(queryVector, topK * 3);
   const allChunks = await store.listChunks();
+  const storedDimension = hasConsistentEmbeddingDimensions(allChunks);
+  const queryEmbedding = await embedChunks([{ id: "__query__", content: query }], apiConfig);
+  const queryVector = queryEmbedding.get("__query__") ?? [];
+  const useStoredSemantic =
+    Boolean(apiConfig.apiKey && apiConfig.baseURL) &&
+    storedDimension !== null &&
+    queryVector.length === storedDimension;
+  const semanticResults = useStoredSemantic
+    ? await store.search(queryVector, topK * 3)
+    : await localSemanticSearch(query, allChunks, topK * 3);
   const chunkMap = new Map(allChunks.map((chunk) => [chunk.id, chunk]));
   const keywordRows = keywordSearch(
     query,
@@ -67,7 +115,8 @@ export async function retrieve(
     .filter((item) => item.score >= minScore)
     .slice(0, topK * 2);
 
-  return mmrRerank(fused, topK, 0.3).slice(0, topK);
+  const reranked = mmrRerank(fused, topK * 3, 0.3);
+  return takeTopResults(reranked, topK);
 }
 
 export function clearStoreCache(kbId?: string): void {

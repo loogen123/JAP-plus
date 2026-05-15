@@ -14,6 +14,16 @@ import {
 
 const ragService = new RAGService();
 
+async function tryReadOriginalDocument(doc: { filePath: string; fileType: string }): Promise<string | null> {
+  if (!doc.filePath) {
+    return null;
+  }
+  if (doc.fileType === "md" || doc.fileType === "txt" || doc.fileType === "code") {
+    return fs.readFile(doc.filePath, "utf-8");
+  }
+  return null;
+}
+
 function getEmbeddingConfig(): { baseURL: string; apiKey: string; model?: string } {
   return {
     baseURL: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
@@ -150,6 +160,11 @@ export class RAGController {
       return;
     }
     try {
+      const original = await tryReadOriginalDocument(doc);
+      if (typeof original === "string" && original.trim()) {
+        res.json({ code: 0, data: { fileName: doc.fileName, content: original } });
+        return;
+      }
       const chunksPath = path.resolve(RAG_DATA_DIR, kbId, "chunks-index.json");
       const raw = await fs.readFile(chunksPath, "utf-8");
       const chunks = (JSON.parse(raw) as Array<{ docId?: unknown; content?: unknown; metadata?: unknown }>)
