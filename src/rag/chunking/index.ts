@@ -3,6 +3,10 @@ import type { ChunkBlockType, ChunkDraft, ChunkMeta, ChunkOptions } from "../typ
 const DEFAULT_CHUNK_SIZE = 800;
 const DEFAULT_CHUNK_OVERLAP = 100;
 const DEFAULT_MIN_CHUNK_SIZE = 50;
+const DEFAULT_PARENT_CONTEXT_CHARS = 240;
+const CLUSTER_TARGET_CHARS = 900;
+const CLUSTER_MAX_CHARS = 1400;
+const MIN_HEADING_PATHS_FOR_SECTIONS = 2;
 const CHARS_PER_TOKEN = 2.5;
 
 function estimateTokens(text: string): number {
@@ -25,10 +29,14 @@ type ParsedBlock = {
   endOffset: number;
 };
 
+type ParentChunkKind = "section" | "cluster";
+
 type ParentChunk = {
   sectionTitle?: string;
   parentPath: string[];
   parentContext: string;
+  parentKind: ParentChunkKind;
+  parentTitle: string;
   startLine: number;
   endLine: number;
   startOffset: number;
@@ -39,6 +47,8 @@ type ParentChunk = {
 type FinalChunkBlock = ParsedBlock & {
   parentPath: string[];
   parentContext: string;
+  parentKind: ParentChunkKind;
+  parentTitle: string;
   childIndexInParent: number;
 };
 
@@ -238,34 +248,123 @@ function splitByFixedSize(text: string, maxTokens: number, overlapTokens: number
   return chunks;
 }
 
-function buildParentChunks(blocks: ParsedBlock[], parentContextChars: number): ParentChunk[] {
-  const grouped = new Map<string, ParsedBlock[]>();
+function countHeadingPaths(blocks: ParsedBlock[]): number {
+  return new Set(blocks.map((block) => block.path.join("\u0000")).filter(Boolean)).size;
+}
+
+function hasStableSectionParent(block: ParsedBlock): boolean {
+  return block.path.length > 1;
+}
+
+function shouldUseSectionParents(blocks: ParsedBlock[]): boolean {
+  if (countHeadingPaths(blocks) < MIN_HEADING_PATHS_FOR_SECTIONS) {
+    return false;
+  }
+  const stableParentBlockCount = blocks.filter(hasStableSectionParent).length;
+  return stableParentBlockCount > blocks.length / 2;
+}
+
+function resolveSectionParentPath(path: string[]): string[] {
+  if (path.length <= 1) {
+    return [...path];
+  }
+  return path.slice(0, -1);
+}
+
+function buildSectionTitle(path: string[]): string {
+  return path[path.length - 1] || "未命名章节";
+}
+
+function isPathWithinSubtree(path: string[], parentPath: string[]): boolean {
+  if (parentPath.length === 0 || path.length < parentPath.length) {
+    return parentPath.length === 0;
+  }
+  return parentPath.every((segment, index) => path[index] === segment);
+}
+
+function buildSectionParentChunks(blocks: ParsedBlock[], parentContextChars: number): ParentChunk[] {
+  const grouped = new Map<string, { parentPath: string[]; blocks: ParsedBlock[] }>();
   for (const block of blocks) {
-    const key = block.path.join("\u0000") || "__root__";
-    const row = grouped.get(key) ?? [];
-    row.push(block);
-    grouped.set(key, row);
+    const parentPath = resolveSectionParentPath(block.path);
+    const key = parentPath.join("\u0000") || "__root__";
+    const entry = grouped.get(key) ?? { parentPath, blocks: [] };
+    entry.blocks.push(block);
+    grouped.set(key, entry);
   }
 
-  return [...grouped.values()].map((group) => {
-    const first = group[0]!;
-    const last = group[group.length - 1]!;
-    const parentContext = group
+  return [...grouped.values()].map(({ parentPath, blocks: group }) => {
+    const subtreeBlocks = blocks.filter((block) => isPathWithinSubtree(block.path, parentPath));
+    const contextBlocks = subtreeBlocks.length > 0 ? subtreeBlocks : group;
+    const first = contextBlocks[0]!;
+    const last = contextBlocks[contextBlocks.length - 1]!;
+    const parentContext = contextBlocks
       .map((item) => item.content)
       .join("\n\n")
       .slice(0, parentContextChars);
 
     return {
-      parentPath: first.path,
+      parentPath,
       parentContext,
+      parentKind: "section",
+      parentTitle: buildSectionTitle(parentPath.length > 0 ? parentPath : first.path),
       startLine: first.startLine,
       endLine: last.endLine,
       startOffset: first.startOffset,
       endOffset: last.endOffset,
       blocks: group,
-      ...(first.sectionTitle ? { sectionTitle: first.sectionTitle } : {}),
+      ...(parentPath.length > 0 ? { sectionTitle: parentPath[parentPath.length - 1] } : {}),
     };
   });
+}
+
+function buildClusterParentChunks(blocks: ParsedBlock[], parentContextChars: number): ParentChunk[] {
+  const parents: ParentChunk[] = [];
+  let bucket: ParsedBlock[] = [];
+  let bucketChars = 0;
+
+  const flush = () => {
+    if (bucket.length === 0) {
+      return;
+    }
+    const first = bucket[0]!;
+    const last = bucket[bucket.length - 1]!;
+    parents.push({
+      parentPath: first.path.length > 0 ? [first.path[0]!] : [],
+      parentContext: bucket
+        .map((item) => item.content)
+        .join("\n\n")
+        .slice(0, parentContextChars),
+      parentKind: "cluster",
+      parentTitle: `未命名片段 ${parents.length + 1}`,
+      startLine: first.startLine,
+      endLine: last.endLine,
+      startOffset: first.startOffset,
+      endOffset: last.endOffset,
+      blocks: bucket,
+      ...(first.sectionTitle ? { sectionTitle: first.sectionTitle } : {}),
+    });
+    bucket = [];
+    bucketChars = 0;
+  };
+
+  for (const block of blocks) {
+    const nextChars = bucketChars + block.content.length;
+    if (bucket.length > 0 && nextChars > CLUSTER_MAX_CHARS && bucketChars >= CLUSTER_TARGET_CHARS) {
+      flush();
+    }
+    bucket.push(block);
+    bucketChars += block.content.length;
+  }
+
+  flush();
+  return parents;
+}
+
+function buildParentChunks(blocks: ParsedBlock[], parentContextChars: number): ParentChunk[] {
+  if (shouldUseSectionParents(blocks)) {
+    return buildSectionParentChunks(blocks, parentContextChars);
+  }
+  return buildClusterParentChunks(blocks, parentContextChars);
 }
 
 function canMergeBlocks(previous: ParsedBlock, current: ParsedBlock): boolean {
@@ -356,11 +455,11 @@ function buildChildChunks(
 
     return split.map((block, childIndexInParent) => ({
       ...block,
-      path: [...parent.parentPath],
       parentPath: [...parent.parentPath],
       parentContext: parent.parentContext,
+      parentKind: parent.parentKind,
+      parentTitle: parent.parentTitle,
       childIndexInParent,
-      ...(parent.sectionTitle ? { sectionTitle: parent.sectionTitle } : {}),
     }));
   });
 }
@@ -373,7 +472,7 @@ export function chunkText(
   const chunkSize = options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const chunkOverlap = options?.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP;
   const minChunkSize = options?.minChunkSize ?? DEFAULT_MIN_CHUNK_SIZE;
-  const parentContextChars = options?.parentContextChars ?? 240;
+  const parentContextChars = options?.parentContextChars ?? DEFAULT_PARENT_CONTEXT_CHARS;
   const normalized = text.trim();
   if (!normalized) {
     return [];
@@ -393,6 +492,8 @@ export function chunkText(
       ...(block.path.length > 0 ? { path: block.path } : {}),
       ...(block.parentPath.length > 0 ? { parentPath: block.parentPath } : {}),
       ...(block.parentContext ? { parentContext: block.parentContext } : {}),
+      parentKind: block.parentKind,
+      parentTitle: block.parentTitle,
       childIndexInParent: block.childIndexInParent,
       ...(block.startOffset !== undefined ? { startOffset: block.startOffset } : {}),
       ...(block.endOffset !== undefined ? { endOffset: block.endOffset } : {}),

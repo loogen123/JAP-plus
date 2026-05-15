@@ -6,6 +6,7 @@
     selectedDocContent: "",
     lastQueryResults: [],
     docContentCache: {},
+    selectedQueryResult: null,
   };
 
   function escapeHtml(input) {
@@ -79,7 +80,7 @@
           <div class="panel" style="border-radius:12px;min-height:0;display:flex;flex-direction:column;">
             <div class="hd" style="padding:12px;">
               <div class="label" style="margin:0;font-size:14px;">检索测试</div>
-              <div style="margin-top:6px;font-size:12px;color:var(--muted);line-height:1.6;">检索范围是当前知识库下的全部文档。点击结果会弹出源文件并自动定位命中片段。</div>
+              <div style="margin-top:6px;font-size:12px;color:var(--muted);line-height:1.6;">检索范围是当前知识库下的全部文档。点击结果可查看命中的完整分块，并可继续打开源文件定位原文。</div>
             </div>
             <div class="bd" style="padding:10px;display:grid;grid-template-rows:auto 1fr;gap:10px;min-height:0;">
               <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
@@ -166,7 +167,10 @@
             <span id="ragChunkTitle" style="font-size:18px;line-height:1.2;">分块内容</span>
             <span id="ragChunkHint" style="font-size:12px;color:var(--muted);font-weight:500;">显示当前命中的完整分块</span>
           </div>
-          <button id="ragChunkClose" class="btn btn-light" style="padding:6px 10px;font-size:12px;">关闭</button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button id="ragChunkOpenSource" class="btn btn-light" style="padding:6px 10px;font-size:12px;">打开源文件定位</button>
+            <button id="ragChunkClose" class="btn btn-light" style="padding:6px 10px;font-size:12px;">关闭</button>
+          </div>
         </div>
         <div class="modal-bd" style="padding:12px;display:grid;grid-template-rows:auto 1fr;gap:10px;min-height:0;overflow:hidden;">
           <div id="ragChunkMeta" class="history-meta" style="padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fafcff;font-size:12px;"></div>
@@ -181,6 +185,7 @@
       }
     });
     document.getElementById("ragChunkClose").addEventListener("click", closeChunkPreviewModal);
+    document.getElementById("ragChunkOpenSource").addEventListener("click", () => void openQueryResultSource());
     return modal;
   }
 
@@ -585,6 +590,18 @@
     await openDocPreview(selectedDoc.id, { fileName: selectedDoc.fileName });
   }
 
+  async function openQueryResultSource() {
+    const result = state.selectedQueryResult;
+    if (!result?.chunk?.docId) {
+      return;
+    }
+    await openDocPreview(result.chunk.docId, {
+      fileName: result.chunk.metadata?.docFileName,
+      fromQuery: true,
+      highlightText: result.chunk.content || "",
+    });
+  }
+
   async function deleteKb() {
     if (!state.selectedKb) return;
     const confirmed = await showConfirm(
@@ -699,8 +716,23 @@
   }
 
   function openChunkPreview(result) {
+    state.selectedQueryResult = result || null;
     const modal = ensureChunkPreviewModal();
     modal.classList.add("show");
+    const lineRange = Array.isArray(result?.chunk?.metadata?.lineRange)
+      ? `${result.chunk.metadata.lineRange[0]} - ${result.chunk.metadata.lineRange[1]}`
+      : "未知";
+    const path = Array.isArray(result?.chunk?.metadata?.path)
+      ? result.chunk.metadata.path.join(" > ")
+      : "";
+    const parentKind = result?.chunk?.metadata?.parentKind;
+    const parentKindLabel = parentKind === "cluster"
+      ? "连续片段"
+      : parentKind === "section"
+        ? "章节父块"
+        : "未知";
+    const parentTitle = String(result?.chunk?.metadata?.parentTitle || "").trim();
+    const parentContext = String(result?.chunk?.metadata?.parentContext || "").trim();
     setText("ragChunkTitle", result?.chunk?.metadata?.docFileName || "分块内容");
     setText(
       "ragChunkHint",
@@ -712,6 +744,11 @@
         <div><strong>来源文件：</strong>${escapeHtml(result?.chunk?.metadata?.docFileName || "")}</div>
         <div style="margin-top:4px;"><strong>分块序号：</strong>${Number(result?.chunk?.metadata?.chunkIndex ?? 0) + 1}</div>
         <div style="margin-top:4px;"><strong>相关度：</strong>${Number(result?.score || 0).toFixed(2)}</div>
+        <div style="margin-top:4px;"><strong>行号范围：</strong>${escapeHtml(lineRange)}</div>
+        ${path ? `<div style="margin-top:4px;"><strong>章节路径：</strong>${escapeHtml(path)}</div>` : ""}
+        ${parentTitle ? `<div style="margin-top:4px;"><strong>父块标题：</strong>${escapeHtml(parentTitle)}</div>` : ""}
+        <div style="margin-top:4px;"><strong>父块类型：</strong>${escapeHtml(parentKindLabel)}</div>
+        ${parentContext ? `<div style="margin-top:8px;"><strong>父级上下文：</strong><div style="margin-top:4px;white-space:pre-wrap;line-height:1.6;">${escapeHtml(parentContext)}</div></div>` : ""}
       `,
     );
     setText("ragChunkContent", String(result?.chunk?.content || ""));

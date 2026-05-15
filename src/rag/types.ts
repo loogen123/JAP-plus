@@ -31,6 +31,8 @@ export type ChunkMeta = {
   endOffset?: number;
   parentPath?: string[];
   parentContext?: string;
+  parentKind?: "section" | "cluster";
+  parentTitle?: string;
   childIndexInParent?: number;
 };
 

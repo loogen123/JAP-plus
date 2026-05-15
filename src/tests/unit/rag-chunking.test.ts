@@ -41,6 +41,69 @@ describe("chunkText", () => {
     expect(result.every((item) => Array.isArray(item.metadata.path))).toBe(true);
   });
 
+  it("同一章节下的多个子标题共享最近上级章节父块", () => {
+    const text = [
+      "# 手册",
+      "总览。",
+      "",
+      "## 步骤 1：定义 MVP 边界",
+      "步骤说明。",
+      "",
+      "### 要做什么？",
+      "写一句核心价值主张。",
+      "",
+      "### 产出物",
+      "范围文档。",
+    ].join("\n");
+
+    const result = chunkText(text, "guide.md", { chunkSize: 120, minChunkSize: 10, parentContextChars: 240 });
+    const a = result.find((item) => item.content.includes("核心价值主张"));
+    const b = result.find((item) => item.content.includes("范围文档"));
+
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    expect(a).not.toBe(b);
+    expect(a?.content).not.toBe(b?.content);
+    expect(a?.metadata.parentPath).toEqual(["手册", "步骤 1：定义 MVP 边界"]);
+    expect(b?.metadata.parentPath).toEqual(["手册", "步骤 1：定义 MVP 边界"]);
+    expect(a?.metadata.parentKind).toBe("section");
+    expect(b?.metadata.parentKind).toBe("section");
+    expect(a?.metadata.parentTitle).toBe("步骤 1：定义 MVP 边界");
+    expect(b?.metadata.parentTitle).toBe("步骤 1：定义 MVP 边界");
+    expect(b?.metadata.parentContext).toContain("步骤说明");
+    expect(b?.metadata.parentContext).toContain("核心价值主张");
+  });
+
+  it("无标题长文不会退化成单个空父块", () => {
+    const text = [
+      "第一段".repeat(120),
+      "",
+      "第二段".repeat(120),
+      "",
+      "第三段".repeat(120),
+      "",
+      "第四段".repeat(120),
+    ].join("\n");
+
+    const result = chunkText(text, "essay.md", {
+      chunkSize: 120,
+      chunkOverlap: 20,
+      minChunkSize: 10,
+      parentContextChars: 320,
+    });
+
+    const titleCounts = result.reduce<Record<string, number>>((acc, item) => {
+      const title = typeof item.metadata.parentTitle === "string" ? item.metadata.parentTitle.trim() : "";
+      if (title) {
+        acc[title] = (acc[title] ?? 0) + 1;
+      }
+      return acc;
+    }, {});
+    expect(result.every((item) => item.metadata.parentKind === "cluster")).toBe(true);
+    expect(Object.keys(titleCounts).length).toBeGreaterThan(1);
+    expect(Object.values(titleCounts).some((count) => count > 1)).toBe(true);
+  });
+
   it("为子块保留父路径与父上下文", () => {
     const text = [
       "# 总览",
@@ -59,8 +122,11 @@ describe("chunkText", () => {
       parentContextChars: 120,
     });
 
-    const retrievalChunk = result.find((item) => item.metadata.sectionTitle === "检索流程");
-    expect(retrievalChunk?.metadata.parentPath).toEqual(["总览", "检索流程"]);
+    const retrievalChunk = result.find((item) => item.content.includes("先扩展查询"));
+    expect(retrievalChunk?.metadata.sectionTitle).toBe("检索流程");
+    expect(retrievalChunk?.metadata.parentPath).toEqual(["总览"]);
+    expect(retrievalChunk?.metadata.parentTitle).toBe("总览");
+    expect(retrievalChunk?.metadata.parentContext).toContain("系统负责统一调度任务");
     expect(retrievalChunk?.metadata.parentContext).toContain("先扩展查询");
     expect(typeof retrievalChunk?.metadata.childIndexInParent).toBe("number");
   });
