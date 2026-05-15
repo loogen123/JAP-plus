@@ -464,6 +464,21 @@ function buildChildChunks(
   });
 }
 
+function sortFinalBlocks(blocks: FinalChunkBlock[]): FinalChunkBlock[] {
+  return [...blocks].sort((a, b) => {
+    if (a.startOffset !== b.startOffset) {
+      return a.startOffset - b.startOffset;
+    }
+    if (a.startLine !== b.startLine) {
+      return a.startLine - b.startLine;
+    }
+    if (a.endOffset !== b.endOffset) {
+      return a.endOffset - b.endOffset;
+    }
+    return a.endLine - b.endLine;
+  });
+}
+
 export function chunkText(
   text: string,
   docFileName: string,
@@ -479,7 +494,7 @@ export function chunkText(
   }
   const parsed = parseBlocks(normalized);
   const parents = buildParentChunks(parsed, parentContextChars);
-  const finalBlocks = buildChildChunks(parents, chunkSize, chunkOverlap, minChunkSize);
+  const finalBlocks = sortFinalBlocks(buildChildChunks(parents, chunkSize, chunkOverlap, minChunkSize));
 
   return finalBlocks.map((block, chunkIndex) => {
     const metadata: ChunkMeta = {

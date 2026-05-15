@@ -131,6 +131,40 @@ describe("chunkText", () => {
     expect(typeof retrievalChunk?.metadata.childIndexInParent).toBe("number");
   });
 
+  it("混合父块时仍按原文顺序输出并连续编号 chunkIndex", () => {
+    const text = [
+      "# 手册",
+      "总览。",
+      "",
+      "## 步骤 1",
+      "步骤 1 导语。",
+      "",
+      "### 要做什么",
+      "写一句核心价值主张。",
+      "",
+      "### 产出物",
+      "范围文档。",
+      "",
+      "## 步骤 2",
+      "步骤 2 导语。",
+    ].join("\n");
+
+    const result = chunkText(text, "guide.md", {
+      chunkSize: 120,
+      minChunkSize: 10,
+      parentContextChars: 240,
+    });
+
+    expect(result.map((item) => item.content)).toEqual([
+      "总览。",
+      "步骤 1 导语。",
+      "写一句核心价值主张。",
+      "范围文档。",
+      "步骤 2 导语。",
+    ]);
+    expect(result.map((item) => item.metadata.chunkIndex)).toEqual([0, 1, 2, 3, 4]);
+  });
+
   it("标题只用于构造父块上下文，不直接输出为孤立叶子块", () => {
     const text = ["# 第一章", "正文A", "", "## 第二节", "正文B"].join("\n");
     const result = chunkText(text, "doc.md", { chunkSize: 120, minChunkSize: 10 });
