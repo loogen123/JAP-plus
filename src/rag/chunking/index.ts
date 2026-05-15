@@ -25,6 +25,23 @@ type ParsedBlock = {
   endOffset: number;
 };
 
+type ParentChunk = {
+  sectionTitle?: string;
+  parentPath: string[];
+  parentContext: string;
+  startLine: number;
+  endLine: number;
+  startOffset: number;
+  endOffset: number;
+  blocks: ParsedBlock[];
+};
+
+type FinalChunkBlock = ParsedBlock & {
+  parentPath: string[];
+  parentContext: string;
+  childIndexInParent: number;
+};
+
 function buildLineOffsets(text: string): number[] {
   const offsets: number[] = [];
   let offset = 0;
@@ -221,6 +238,36 @@ function splitByFixedSize(text: string, maxTokens: number, overlapTokens: number
   return chunks;
 }
 
+function buildParentChunks(blocks: ParsedBlock[], parentContextChars: number): ParentChunk[] {
+  const grouped = new Map<string, ParsedBlock[]>();
+  for (const block of blocks) {
+    const key = block.path.join("\u0000") || "__root__";
+    const row = grouped.get(key) ?? [];
+    row.push(block);
+    grouped.set(key, row);
+  }
+
+  return [...grouped.values()].map((group) => {
+    const first = group[0]!;
+    const last = group[group.length - 1]!;
+    const parentContext = group
+      .map((item) => item.content)
+      .join("\n\n")
+      .slice(0, parentContextChars);
+
+    return {
+      parentPath: first.path,
+      parentContext,
+      startLine: first.startLine,
+      endLine: last.endLine,
+      startOffset: first.startOffset,
+      endOffset: last.endOffset,
+      blocks: group,
+      ...(first.sectionTitle ? { sectionTitle: first.sectionTitle } : {}),
+    };
+  });
+}
+
 function canMergeBlocks(previous: ParsedBlock, current: ParsedBlock): boolean {
   if (previous.blockType !== current.blockType || previous.blockType === "code") {
     return false;
@@ -228,17 +275,17 @@ function canMergeBlocks(previous: ParsedBlock, current: ParsedBlock): boolean {
   return previous.path.join("\u0000") === current.path.join("\u0000");
 }
 
-function mergeBlocks(previous: ParsedBlock, current: ParsedBlock): ParsedBlock {
+function mergeBlocks<T extends ParsedBlock>(previous: T, current: T): T {
   return {
     ...previous,
     content: `${previous.content}\n\n${current.content}`,
     endLine: current.endLine,
     endOffset: current.endOffset,
-  };
+  } as T;
 }
 
-function mergeSmallBlocks(blocks: ParsedBlock[], minChunkSize: number): ParsedBlock[] {
-  const merged: ParsedBlock[] = [];
+function mergeSmallBlocks<T extends ParsedBlock>(blocks: T[], minChunkSize: number): T[] {
+  const merged: T[] = [];
   const queue = [...blocks];
   let index = 0;
 
@@ -276,7 +323,7 @@ function mergeSmallBlocks(blocks: ParsedBlock[], minChunkSize: number): ParsedBl
   return merged;
 }
 
-function splitOversizeBlocks(blocks: ParsedBlock[], chunkSize: number, chunkOverlap: number): ParsedBlock[] {
+function splitOversizeBlocks<T extends ParsedBlock>(blocks: T[], chunkSize: number, chunkOverlap: number): T[] {
   return blocks.flatMap((block) => {
     if (!["paragraph", "code"].includes(block.blockType) || estimateTokens(block.content) <= chunkSize) {
       return [block];
@@ -292,8 +339,29 @@ function splitOversizeBlocks(blocks: ParsedBlock[], chunkSize: number, chunkOver
         content: part,
         startOffset,
         endOffset: startOffset + part.length,
-      };
+      } as T;
     });
+  });
+}
+
+function buildChildChunks(
+  parents: ParentChunk[],
+  chunkSize: number,
+  chunkOverlap: number,
+  minChunkSize: number,
+): FinalChunkBlock[] {
+  return parents.flatMap((parent) => {
+    const merged = mergeSmallBlocks(parent.blocks, minChunkSize);
+    const split = splitOversizeBlocks(merged, chunkSize, chunkOverlap);
+
+    return split.map((block, childIndexInParent) => ({
+      ...block,
+      path: [...parent.parentPath],
+      parentPath: [...parent.parentPath],
+      parentContext: parent.parentContext,
+      childIndexInParent,
+      ...(parent.sectionTitle ? { sectionTitle: parent.sectionTitle } : {}),
+    }));
   });
 }
 
@@ -305,13 +373,14 @@ export function chunkText(
   const chunkSize = options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const chunkOverlap = options?.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP;
   const minChunkSize = options?.minChunkSize ?? DEFAULT_MIN_CHUNK_SIZE;
+  const parentContextChars = options?.parentContextChars ?? 240;
   const normalized = text.trim();
   if (!normalized) {
     return [];
   }
   const parsed = parseBlocks(normalized);
-  const merged = mergeSmallBlocks(parsed, minChunkSize);
-  const finalBlocks = splitOversizeBlocks(merged, chunkSize, chunkOverlap);
+  const parents = buildParentChunks(parsed, parentContextChars);
+  const finalBlocks = buildChildChunks(parents, chunkSize, chunkOverlap, minChunkSize);
 
   return finalBlocks.map((block, chunkIndex) => {
     const metadata: ChunkMeta = {
@@ -322,6 +391,9 @@ export function chunkText(
       ...(block.sectionTitle ? { sectionTitle: block.sectionTitle } : {}),
       ...(block.blockType ? { blockType: block.blockType } : {}),
       ...(block.path.length > 0 ? { path: block.path } : {}),
+      ...(block.parentPath.length > 0 ? { parentPath: block.parentPath } : {}),
+      ...(block.parentContext ? { parentContext: block.parentContext } : {}),
+      childIndexInParent: block.childIndexInParent,
       ...(block.startOffset !== undefined ? { startOffset: block.startOffset } : {}),
       ...(block.endOffset !== undefined ? { endOffset: block.endOffset } : {}),
     };

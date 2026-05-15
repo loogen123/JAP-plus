@@ -29,6 +29,9 @@ export type ChunkMeta = {
   path?: string[];
   startOffset?: number;
   endOffset?: number;
+  parentPath?: string[];
+  parentContext?: string;
+  childIndexInParent?: number;
 };
 
 export type ChunkBlockType = "paragraph" | "list" | "table" | "code" | "quote";
@@ -66,11 +69,15 @@ export type ChunkOptions = {
   chunkSize?: number;
   chunkOverlap?: number;
   minChunkSize?: number;
+  parentContextChars?: number;
 };
 
 export type RetrieveOptions = {
   topK?: number;
   minScore?: number;
+  candidatePoolMultiplier?: number;
+  candidatePoolMin?: number;
+  queryRewriteLimit?: number;
 };
 
 export type KBIndex = {

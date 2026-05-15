@@ -79,3 +79,20 @@ export function mmrRerank(
   }
   return selected;
 }
+
+export function applySoftDiversification(
+  results: RetrievalResult[],
+  decay: number = 0.92,
+): RetrievalResult[] {
+  const counts = new Map<string, number>();
+  return [...results]
+    .map((item) => {
+      const seen = counts.get(item.chunk.docId) ?? 0;
+      counts.set(item.chunk.docId, seen + 1);
+      return {
+        ...item,
+        score: item.score * Math.pow(decay, seen),
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+}

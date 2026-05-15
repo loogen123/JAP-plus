@@ -29,7 +29,11 @@ export function buildRAGPrompt(
       .split("\n")
       .map((line) => `> ${line}`)
       .join("\n");
-    const citation = `### 引用 ${i + 1}（来源：${result.source}，相关度：${result.score.toFixed(2)}）\n${quote}\n\n`;
+    const parentPath = result.chunk.metadata.parentPath?.join(" > ");
+    const parentContext = result.chunk.metadata.parentContext?.trim();
+    const prefix = parentPath ? `章节：${parentPath}\n` : "";
+    const context = parentContext ? `父级上下文：${parentContext}\n\n` : "";
+    const citation = `### 引用 ${i + 1}（来源：${result.source}，相关度：${result.score.toFixed(2)}）\n${prefix}${context}${quote}\n\n`;
     const citationTokens = estimateTokens(citation);
     if (usedTokens + citationTokens > tokenLimit) {
       break;

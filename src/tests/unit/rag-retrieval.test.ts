@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Chunk, RetrievalResult } from "../../rag/types.js";
 import { cosineSimilarity, embedChunks, tokenize } from "../../rag/embedding/index.js";
 import { bm25Score } from "../../rag/retrieval/hybridSearch.js";
-import { takeTopResults } from "../../rag/retrieval/index.js";
-import { mmrRerank, rrfFuse } from "../../rag/retrieval/reranker.js";
+import { expandQueries, resolveCandidatePoolSize, takeTopResults } from "../../rag/retrieval/index.js";
+import { applySoftDiversification, mmrRerank, rrfFuse } from "../../rag/retrieval/reranker.js";
 
 function makeChunk(id: string, content: string, docId: string = "doc-1"): Chunk {
   return {
@@ -106,5 +106,39 @@ describe("takeTopResults", () => {
 
     const ranked = takeTopResults(results, 2);
     expect(ranked.map((item) => item.chunk.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("expandQueries", () => {
+  it("为中英文混合术语生成有限查询扩展", () => {
+    const rewrites = expandQueries("Quest worktree 并行开发", 3);
+    expect(rewrites[0]).toBe("Quest worktree 并行开发");
+    expect(rewrites.length).toBeLessThanOrEqual(3);
+    expect(rewrites.some((item) => item.includes("worktree"))).toBe(true);
+    expect(new Set(rewrites).size).toBe(rewrites.length);
+  });
+});
+
+describe("resolveCandidatePoolSize", () => {
+  it("按固定下限和倍率放大候选池", () => {
+    expect(resolveCandidatePoolSize(5, undefined, undefined)).toBe(40);
+    expect(resolveCandidatePoolSize(2, undefined, undefined)).toBe(20);
+    expect(resolveCandidatePoolSize(4, 6, 30)).toBe(30);
+  });
+});
+
+describe("applySoftDiversification", () => {
+  it("对同文档连续命中做轻量衰减而不是硬裁剪", () => {
+    const results: RetrievalResult[] = [
+      { chunk: makeChunk("a", "A", "doc-1"), score: 0.95, source: "doc-1" },
+      { chunk: makeChunk("b", "B", "doc-1"), score: 0.94, source: "doc-1" },
+      { chunk: makeChunk("c", "C", "doc-2"), score: 0.9, source: "doc-2" },
+    ];
+
+    const diversified = applySoftDiversification(results, 0.92);
+    expect(diversified).toHaveLength(3);
+    expect(diversified[0]?.chunk.id).toBe("a");
+    expect(diversified.some((item) => item.chunk.id === "c")).toBe(true);
+    expect((diversified.find((item) => item.chunk.id === "b")?.score ?? 0)).toBeLessThan(0.94);
   });
 });
