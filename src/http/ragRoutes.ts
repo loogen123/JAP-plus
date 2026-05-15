@@ -9,5 +9,6 @@ export function registerRagRoutes(app: Express): void {
   app.get("/api/v1/rag/knowledge-bases/:kbId", (req, res) => { void controller.getKB(req, res); });
   app.post("/api/v1/rag/knowledge-bases/:kbId/documents", (req, res) => { void controller.uploadDocs(req, res); });
   app.delete("/api/v1/rag/knowledge-bases/:kbId/documents/:docId", (req, res) => { void controller.deleteDoc(req, res); });
+  app.get("/api/v1/rag/knowledge-bases/:kbId/documents/:docId/content", (req, res) => { void controller.getDocContent(req, res); });
   app.post("/api/v1/rag/knowledge-bases/:kbId/query", (req, res) => { void controller.queryKB(req, res); });
 }

@@ -135,6 +135,40 @@ export class RAGController {
     }
   }
 
+  async getDocContent(req: Request, res: Response): Promise<void> {
+    const kbId = String(req.params.kbId ?? "").trim();
+    const docId = String(req.params.docId ?? "").trim();
+    const kb = await getKnowledgeBase(kbId);
+    if (!kb) {
+      res.status(404).json({ code: 1, message: "not found" });
+      return;
+    }
+    const docs = await loadDocsIndex(kbId);
+    const doc = docs.find((item) => item.id === docId);
+    if (!doc) {
+      res.status(404).json({ code: 1, message: "document not found" });
+      return;
+    }
+    try {
+      const chunksPath = path.resolve(RAG_DATA_DIR, kbId, "chunks-index.json");
+      const raw = await fs.readFile(chunksPath, "utf-8");
+      const chunks = (JSON.parse(raw) as Array<{ docId?: unknown; content?: unknown; metadata?: unknown }>)
+        .filter((row) => row && String(row.docId ?? "") === docId)
+        .map((row) => ({
+          content: typeof row.content === "string" ? row.content : "",
+          chunkIndex:
+            row.metadata && typeof row.metadata === "object" && typeof (row.metadata as any).chunkIndex === "number"
+              ? (row.metadata as any).chunkIndex
+              : 0,
+        }))
+        .sort((a, b) => a.chunkIndex - b.chunkIndex);
+      const content = chunks.map((c) => c.content).filter(Boolean).join("\n\n");
+      res.json({ code: 0, data: { fileName: doc.fileName, content } });
+    } catch (error) {
+      res.status(500).json({ code: 1, message: String(error) });
+    }
+  }
+
   async queryKB(req: Request, res: Response): Promise<void> {
     const kbId = String(req.params.kbId ?? "").trim();
     const query = typeof req.body?.query === "string" ? req.body.query.trim() : "";
