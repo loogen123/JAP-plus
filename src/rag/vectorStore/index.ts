@@ -152,6 +152,8 @@ export async function createVectorStore(kbPath: string): Promise<VectorStore> {
               } as Chunk,
               score: 1 - (res.distances[idx] ?? 1),
               source: toSource(entry),
+              kbId: entry.kbId,
+              kbName: "",
             } satisfies RetrievalResult;
           })
           .filter((item): item is RetrievalResult => item !== null);
@@ -166,6 +168,8 @@ export async function createVectorStore(kbPath: string): Promise<VectorStore> {
             } as Chunk,
             score: cosineSimilarity(queryVector, vector),
             source: toSource(entry),
+            kbId: entry.kbId,
+            kbName: "",
           } satisfies RetrievalResult;
         })
         .sort((a, b) => b.score - a.score)

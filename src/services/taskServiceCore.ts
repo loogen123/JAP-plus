@@ -695,14 +695,18 @@ async function withRagRequirement(
   fileId: FileId,
   approvedSummary: string,
 ): Promise<FileRunMeta> {
-  const kbId = meta.ragKbIds?.[0];
-  if (!kbId) {
+  const kbIds = meta.ragKbIds?.filter((item) => typeof item === "string" && item.trim()) ?? [];
+  if (kbIds.length === 0) {
     return meta;
   }
   try {
     const { RAGService, getKnowledgeBase } = await import("../rag/index.js");
-    const kb = await getKnowledgeBase(kbId);
-    if (!kb) {
+    const existingKbIds = (
+      await Promise.all(
+        kbIds.map(async (kbId) => ((await getKnowledgeBase(kbId)) ? kbId : null)),
+      )
+    ).filter((item): item is string => Boolean(item));
+    if (existingKbIds.length === 0) {
       return meta;
     }
     const service = new RAGService();
@@ -712,14 +716,13 @@ async function withRagRequirement(
       requirement: meta.requirement,
       approvedSummary,
     });
-    const ctx = await service.retrieveAndBuild(
+    const ctx = await service.retrieveAndBuildAcrossKnowledgeBases(
       builtQuery.query,
-      kbId,
+      existingKbIds,
       {
         baseURL: meta.llm.baseUrl,
         apiKey: meta.llm.apiKey,
       },
-      kb.name,
     );
     if (!ctx.injectedPrompt.trim()) {
       return meta;

@@ -54,6 +54,8 @@ export type RetrievalResult = {
   chunk: Chunk;
   score: number;
   source: string;
+  kbId: string;
+  kbName: string;
 };
 
 export type RAGContext = {

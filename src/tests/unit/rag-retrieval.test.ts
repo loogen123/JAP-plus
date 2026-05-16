@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Chunk, RetrievalResult } from "../../rag/types.js";
 import { cosineSimilarity, embedChunks, tokenize } from "../../rag/embedding/index.js";
 import { bm25Score } from "../../rag/retrieval/hybridSearch.js";
-import { expandQueries, resolveCandidatePoolSize, takeTopResults } from "../../rag/retrieval/index.js";
+import {
+  expandQueries,
+  mergeRetrievalResults,
+  resolveCandidatePoolSize,
+  takeTopResults,
+} from "../../rag/retrieval/index.js";
 import { applySoftDiversification, mmrRerank, rrfFuse } from "../../rag/retrieval/reranker.js";
 
 function makeChunk(id: string, content: string, docId: string = "doc-1"): Chunk {
@@ -17,6 +22,23 @@ function makeChunk(id: string, content: string, docId: string = "doc-1"): Chunk 
       chunkIndex: 0,
       tokenCount: 10,
     },
+  };
+}
+
+function makeResult(
+  id: string,
+  content: string,
+  score: number,
+  docId: string = "doc-1",
+  kbId: string = "kb-1",
+  kbName: string = "知识库A",
+): RetrievalResult {
+  return {
+    chunk: makeChunk(id, content, docId),
+    score,
+    source: docId,
+    kbId,
+    kbName,
   };
 }
 
@@ -60,12 +82,12 @@ describe("embedChunks fallback", () => {
 describe("rrfFuse", () => {
   it("合并两组排序结果", () => {
     const semantic: RetrievalResult[] = [
-      { chunk: makeChunk("a", "登录"), score: 0.9, source: "" },
-      { chunk: makeChunk("b", "注册"), score: 0.7, source: "" },
+      makeResult("a", "登录", 0.9),
+      makeResult("b", "注册", 0.7),
     ];
     const keyword: RetrievalResult[] = [
-      { chunk: makeChunk("b", "注册"), score: 0.8, source: "" },
-      { chunk: makeChunk("c", "设置"), score: 0.5, source: "" },
+      makeResult("b", "注册", 0.8),
+      makeResult("c", "设置", 0.5),
     ];
     const fused = rrfFuse(semantic, keyword);
     expect(fused[0]?.chunk.id).toBe("b");
@@ -76,9 +98,9 @@ describe("rrfFuse", () => {
 describe("mmrRerank", () => {
   it("控制结果数量", () => {
     const results: RetrievalResult[] = [
-      { chunk: makeChunk("a", "登录认证机制设计"), score: 0.95, source: "" },
-      { chunk: makeChunk("b", "登录页面UI设计"), score: 0.85, source: "" },
-      { chunk: makeChunk("c", "数据库索引优化"), score: 0.75, source: "" },
+      makeResult("a", "登录认证机制设计", 0.95),
+      makeResult("b", "登录页面UI设计", 0.85),
+      makeResult("c", "数据库索引优化", 0.75),
     ];
     const reranked = mmrRerank(results, 2, 0.7);
     expect(reranked.length).toBeLessThanOrEqual(2);
@@ -88,9 +110,9 @@ describe("mmrRerank", () => {
 describe("takeTopResults", () => {
   it("允许同一文档返回多个高分块", () => {
     const results: RetrievalResult[] = [
-      { chunk: makeChunk("a", "登录设计", "doc-1"), score: 0.95, source: "" },
-      { chunk: makeChunk("b", "登录接口", "doc-1"), score: 0.9, source: "" },
-      { chunk: makeChunk("c", "系统设置", "doc-2"), score: 0.6, source: "" },
+      makeResult("a", "登录设计", 0.95, "doc-1"),
+      makeResult("b", "登录接口", 0.9, "doc-1"),
+      makeResult("c", "系统设置", 0.6, "doc-2"),
     ];
 
     const ranked = takeTopResults(results, 2);
@@ -99,13 +121,70 @@ describe("takeTopResults", () => {
 
   it("按全局分数顺序截断 topK", () => {
     const results: RetrievalResult[] = [
-      { chunk: makeChunk("a", "A", "doc-1"), score: 0.81, source: "" },
-      { chunk: makeChunk("b", "B", "doc-2"), score: 0.79, source: "" },
-      { chunk: makeChunk("c", "C", "doc-1"), score: 0.78, source: "" },
+      makeResult("a", "A", 0.81, "doc-1"),
+      makeResult("b", "B", 0.79, "doc-2"),
+      makeResult("c", "C", 0.78, "doc-1"),
     ];
 
     const ranked = takeTopResults(results, 2);
     expect(ranked.map((item) => item.chunk.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("mergeRetrievalResults", () => {
+  it("合并多库结果并保留知识库来源", () => {
+    const merged = mergeRetrievalResults(
+      [
+        [
+          makeResult("a", "登录设计", 0.81, "doc-1", "kb-1", "知识库A"),
+        ],
+        [
+          makeResult("b", "接口契约", 0.92, "doc-2", "kb-2", "知识库B"),
+        ],
+      ],
+      5,
+    );
+
+    expect(merged.map((item) => item.chunk.id)).toEqual(["b", "a"]);
+    expect(merged[0]?.kbName).toBe("知识库B");
+    expect(merged[1]?.kbId).toBe("kb-1");
+  });
+
+  it("按 chunk 去重并保留更高分结果", () => {
+    const merged = mergeRetrievalResults(
+      [
+        [
+          makeResult("a", "登录设计", 0.61, "doc-1", "kb-1", "知识库A"),
+        ],
+        [
+          makeResult("a", "登录设计", 0.88, "doc-1", "kb-2", "知识库B"),
+        ],
+      ],
+      5,
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.score).toBe(0.88);
+    expect(merged[0]?.kbName).toBe("知识库B");
+  });
+
+  it("跨库不同 chunk.id 但同 source 和 content 时按更高分去重", () => {
+    const merged = mergeRetrievalResults(
+      [
+        [
+          makeResult("a-1", "登录设计", 0.61, "shared-doc", "kb-1", "知识库A"),
+        ],
+        [
+          makeResult("b-9", "登录设计", 0.88, "shared-doc", "kb-2", "知识库B"),
+        ],
+      ],
+      5,
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.chunk.id).toBe("b-9");
+    expect(merged[0]?.score).toBe(0.88);
+    expect(merged[0]?.kbName).toBe("知识库B");
   });
 });
 
@@ -130,9 +209,9 @@ describe("resolveCandidatePoolSize", () => {
 describe("applySoftDiversification", () => {
   it("对同文档连续命中做轻量衰减而不是硬裁剪", () => {
     const results: RetrievalResult[] = [
-      { chunk: makeChunk("a", "A", "doc-1"), score: 0.95, source: "doc-1" },
-      { chunk: makeChunk("b", "B", "doc-1"), score: 0.94, source: "doc-1" },
-      { chunk: makeChunk("c", "C", "doc-2"), score: 0.9, source: "doc-2" },
+      makeResult("a", "A", 0.95, "doc-1"),
+      makeResult("b", "B", 0.94, "doc-1"),
+      makeResult("c", "C", 0.9, "doc-2"),
     ];
 
     const diversified = applySoftDiversification(results, 0.92);
@@ -140,5 +219,80 @@ describe("applySoftDiversification", () => {
     expect(diversified[0]?.chunk.id).toBe("a");
     expect(diversified.some((item) => item.chunk.id === "c")).toBe(true);
     expect((diversified.find((item) => item.chunk.id === "b")?.score ?? 0)).toBeLessThan(0.94);
+  });
+});
+
+describe("RAGService multi-kb", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it("单库失败时跳过失败库并返回其他库结果", async () => {
+    const kbManagerMocks = {
+      addDocumentToIndex: vi.fn(),
+      loadDocsIndex: vi.fn(),
+      removeDocumentFromIndex: vi.fn(),
+      updateKBStats: vi.fn(),
+      listKnowledgeBases: vi.fn(),
+      createKnowledgeBase: vi.fn(),
+      getKnowledgeBase: vi.fn(async (kbId: string) => {
+        if (kbId === "kb-1") {
+          return { id: "kb-1", name: "知识库A" };
+        }
+        if (kbId === "kb-2") {
+          return { id: "kb-2", name: "知识库B" };
+        }
+        return null;
+      }),
+      deleteKnowledgeBase: vi.fn(),
+    };
+    const retrievalMocks = {
+      clearStoreCache: vi.fn(),
+      retrieve: vi.fn(async (_query: string, kbId: string) => {
+        if (kbId === "kb-1") {
+          throw new Error("retrieve failed");
+        }
+        return [
+          {
+            chunk: {
+              id: "chunk-2",
+              docId: "doc-2",
+              kbId: "kb-2",
+              content: "接口契约",
+              embedding: [],
+              metadata: {
+                docFileName: "doc-2.md",
+                chunkIndex: 0,
+                tokenCount: 10,
+              },
+            },
+            score: 0.91,
+            source: "doc-2.md",
+            kbId: "kb-2",
+            kbName: "",
+          },
+        ];
+      }),
+      mergeRetrievalResults: vi.fn((groups: RetrievalResult[][], topK: number) =>
+        groups.flat().sort((a, b) => b.score - a.score).slice(0, topK),
+      ),
+    };
+
+    vi.doMock("../../rag/kbManager.js", () => kbManagerMocks);
+    vi.doMock("../../rag/retrieval/index.js", () => retrievalMocks);
+
+    const { RAGService } = await import("../../rag/index.js");
+    const service = new RAGService();
+    const results = await service.retrieveAcrossKnowledgeBases(
+      "接口",
+      ["kb-1", "kb-2"],
+      { baseURL: "", apiKey: "" },
+      { topK: 5 },
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.kbId).toBe("kb-2");
+    expect(results[0]?.kbName).toBe("知识库B");
   });
 });

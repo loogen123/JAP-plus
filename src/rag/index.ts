@@ -5,7 +5,11 @@ import { chunkText } from "./chunking/index.js";
 import { embedChunks } from "./embedding/index.js";
 import { createVectorStore, type VectorStore } from "./vectorStore/index.js";
 import { buildRAGPrompt } from "./injection/index.js";
-import { clearStoreCache, retrieve as retrieveCore } from "./retrieval/index.js";
+import {
+  clearStoreCache,
+  mergeRetrievalResults,
+  retrieve as retrieveCore,
+} from "./retrieval/index.js";
 import {
   addDocumentToIndex,
   loadDocsIndex,
@@ -114,8 +118,12 @@ export class RAGService {
     kbName: string,
     options?: RetrieveOptions & { maxPromptTokens?: number },
   ): Promise<RAGContext> {
-    const results = await retrieveCore(query, kbId, apiConfig, options);
-    const injectedPrompt = buildRAGPrompt(results, kbName, options?.maxPromptTokens);
+    const results = (await retrieveCore(query, kbId, apiConfig, options)).map((item) => ({
+      ...item,
+      kbId,
+      kbName,
+    }));
+    const injectedPrompt = buildRAGPrompt(results, options?.maxPromptTokens);
     return { query, results, injectedPrompt };
   }
 
@@ -125,7 +133,52 @@ export class RAGService {
     apiConfig: ApiConfig,
     options?: RetrieveOptions,
   ): Promise<RetrievalResult[]> {
-    return retrieveCore(query, kbId, apiConfig, options);
+    const kb = await getKnowledgeBase(kbId);
+    const kbName = kb?.name ?? "";
+    return (await retrieveCore(query, kbId, apiConfig, options)).map((item) => ({
+      ...item,
+      kbId,
+      kbName,
+    }));
+  }
+
+  async retrieveAcrossKnowledgeBases(
+    query: string,
+    kbIds: string[],
+    apiConfig: ApiConfig,
+    options?: RetrieveOptions,
+  ): Promise<RetrievalResult[]> {
+    const topK = options?.topK ?? 5;
+    const groups = await Promise.all(
+      kbIds.map(async (kbId) => {
+        try {
+          const kb = await getKnowledgeBase(kbId);
+          if (!kb) {
+            return [];
+          }
+          const results = await retrieveCore(query, kbId, apiConfig, options);
+          return results.map((item) => ({
+            ...item,
+            kbId,
+            kbName: kb.name,
+          }));
+        } catch {
+          return [];
+        }
+      }),
+    );
+    return mergeRetrievalResults(groups, topK);
+  }
+
+  async retrieveAndBuildAcrossKnowledgeBases(
+    query: string,
+    kbIds: string[],
+    apiConfig: ApiConfig,
+    options?: RetrieveOptions & { maxPromptTokens?: number },
+  ): Promise<RAGContext> {
+    const results = await this.retrieveAcrossKnowledgeBases(query, kbIds, apiConfig, options);
+    const injectedPrompt = buildRAGPrompt(results, options?.maxPromptTokens);
+    return { query, results, injectedPrompt };
   }
 
   async removeDocument(kbId: string, docId: string): Promise<void> {

@@ -46,6 +46,7 @@ async function localSemanticSearch(
   query: string,
   chunks: Awaited<ReturnType<VectorStore["listChunks"]>>,
   topK: number,
+  kbId: string,
 ): Promise<RetrievalResult[]> {
   const queryVector = embedWithHashing([{ id: "__query__", content: query }]).get("__query__") ?? [];
   return chunks
@@ -59,6 +60,8 @@ async function localSemanticSearch(
         },
         score: cosineSimilarity(queryVector, embedding),
         source: `${chunk.metadata.docFileName}${section}`,
+        kbId,
+        kbName: "",
       } satisfies RetrievalResult;
     })
     .sort((a, b) => b.score - a.score)
@@ -67,6 +70,42 @@ async function localSemanticSearch(
 
 export function takeTopResults(results: RetrievalResult[], topK: number): RetrievalResult[] {
   return results.slice(0, topK);
+}
+
+export function mergeRetrievalResults(
+  groups: RetrievalResult[][],
+  topK: number,
+): RetrievalResult[] {
+  const dedupedByChunkId = new Map<string, RetrievalResult>();
+  const dedupedBySourceContent = new Map<string, RetrievalResult>();
+  for (const item of groups.flat()) {
+    const sourceContentKey = `${item.source}::${item.chunk.content}`;
+    const bySourceContent = dedupedBySourceContent.get(sourceContentKey);
+    if (bySourceContent && bySourceContent.score >= item.score) {
+      continue;
+    }
+    if (bySourceContent) {
+      dedupedBySourceContent.set(sourceContentKey, item);
+      if (bySourceContent.chunk.id) {
+        dedupedByChunkId.delete(bySourceContent.chunk.id);
+      }
+    }
+    if (item.chunk.id) {
+      const byChunkId = dedupedByChunkId.get(item.chunk.id);
+      if (byChunkId && byChunkId.score >= item.score) {
+        continue;
+      }
+      if (byChunkId) {
+        dedupedBySourceContent.delete(`${byChunkId.source}::${byChunkId.chunk.content}`);
+      }
+      dedupedByChunkId.set(item.chunk.id, item);
+    }
+    dedupedBySourceContent.set(sourceContentKey, item);
+  }
+  return takeTopResults(
+    [...dedupedBySourceContent.values()].sort((a, b) => b.score - a.score),
+    topK,
+  );
 }
 
 export function resolveCandidatePoolSize(
@@ -107,6 +146,7 @@ function dedupeByChunkId(results: RetrievalResult[]): RetrievalResult[] {
 function mapKeywordRows(
   rows: { id: string; score: number }[],
   chunkMap: Map<string, Awaited<ReturnType<VectorStore["listChunks"]>>[number]>,
+  kbId: string,
 ): RetrievalResult[] {
   return rows
     .map((row) => {
@@ -119,6 +159,8 @@ function mapKeywordRows(
         chunk,
         score: row.score,
         source: `${chunk.metadata.docFileName}${section}`,
+        kbId,
+        kbName: "",
       } satisfies RetrievalResult;
     })
     .filter((item): item is RetrievalResult => item !== null);
@@ -163,7 +205,7 @@ export async function retrieve(
           const variantVector = variantEmbedding.get("__query__") ?? [];
           return store.search(variantVector, candidatePoolSize);
         }
-        return localSemanticSearch(variant, allChunks, candidatePoolSize);
+          return localSemanticSearch(variant, allChunks, candidatePoolSize, kbId);
       }),
     )
   ).flat();
@@ -174,7 +216,7 @@ export async function retrieve(
       candidatePoolSize,
     ),
   );
-  const keywordResults = dedupeByChunkId(mapKeywordRows(keywordRows, chunkMap));
+  const keywordResults = dedupeByChunkId(mapKeywordRows(keywordRows, chunkMap, kbId));
 
   const fused = rrfFuse(dedupeByChunkId(semanticResults), keywordResults)
     .filter((item) => item.score >= minScore)
