@@ -172,9 +172,16 @@
             <button id="ragChunkClose" class="btn btn-light" style="padding:6px 10px;font-size:12px;">关闭</button>
           </div>
         </div>
-        <div class="modal-bd" style="padding:12px;display:grid;grid-template-rows:auto 1fr;gap:10px;min-height:0;overflow:hidden;">
+        <div class="modal-bd" style="padding:12px;display:grid;grid-template-rows:auto minmax(0,7fr) minmax(0,3fr);gap:10px;min-height:0;overflow:hidden;">
           <div id="ragChunkMeta" class="history-meta" style="padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fafcff;font-size:12px;"></div>
-          <pre id="ragChunkContent" class="preview" style="margin:0;height:100%;max-height:none;min-height:0;font-size:13px;color:var(--text);background:#fafcff;"></pre>
+          <div id="ragChunkParentPanel" style="min-height:0;display:grid;grid-template-rows:auto 1fr;gap:8px;">
+            <div style="font-size:12px;font-weight:700;color:var(--muted);">父模块完整上下文</div>
+            <pre id="ragChunkParentContext" class="preview" style="margin:0;height:100%;max-height:none;min-height:0;overflow:auto;font-size:13px;color:var(--text);background:#fafcff;"></pre>
+          </div>
+          <div style="min-height:0;display:grid;grid-template-rows:auto 1fr;gap:8px;">
+            <div style="font-size:12px;font-weight:700;color:var(--muted);">命中子模块</div>
+            <pre id="ragChunkContent" class="preview" style="margin:0;height:100%;max-height:none;min-height:0;overflow:auto;font-size:13px;color:var(--text);background:#fafcff;"></pre>
+          </div>
         </div>
       </div>
     `;
@@ -732,7 +739,11 @@
         ? "章节父块"
         : "未知";
     const parentTitle = String(result?.chunk?.metadata?.parentTitle || "").trim();
-    const parentContext = String(result?.chunk?.metadata?.parentContext || "").trim();
+    const parentContext = String(
+      result?.chunk?.metadata?.parentFullContext
+      || result?.chunk?.metadata?.parentContext
+      || "",
+    ).trim();
     setText("ragChunkTitle", result?.chunk?.metadata?.docFileName || "分块内容");
     setText(
       "ragChunkHint",
@@ -748,9 +759,9 @@
         ${path ? `<div style="margin-top:4px;"><strong>章节路径：</strong>${escapeHtml(path)}</div>` : ""}
         ${parentTitle ? `<div style="margin-top:4px;"><strong>父块标题：</strong>${escapeHtml(parentTitle)}</div>` : ""}
         <div style="margin-top:4px;"><strong>父块类型：</strong>${escapeHtml(parentKindLabel)}</div>
-        ${parentContext ? `<div style="margin-top:8px;"><strong>父级上下文：</strong><div style="margin-top:4px;white-space:pre-wrap;line-height:1.6;">${escapeHtml(parentContext)}</div></div>` : ""}
       `,
     );
+    setText("ragChunkParentContext", parentContext);
     setText("ragChunkContent", String(result?.chunk?.content || ""));
   }
 

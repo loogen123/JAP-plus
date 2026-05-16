@@ -104,6 +104,33 @@ describe("chunkText", () => {
     expect(Object.values(titleCounts).some((count) => count > 1)).toBe(true);
   });
 
+  it("同时保留父级上下文预览和完整父级上下文", () => {
+    const text = [
+      "# 手册",
+      "",
+      "## 步骤 1：定义 MVP 边界",
+      "步骤说明。",
+      "",
+      "### 要做什么？",
+      "写一句核心价值主张。",
+      "",
+      "### 产出物",
+      "范围文档。",
+    ].join("\n");
+
+    const result = chunkText(text, "guide.md", {
+      chunkSize: 120,
+      minChunkSize: 10,
+      parentContextChars: 12,
+    });
+    const target = result.find((item) => item.content.includes("范围文档"));
+
+    expect(target?.metadata.parentContext).toBe("步骤说明。\n\n写一句核心");
+    expect(target?.metadata.parentFullContext).toContain("步骤说明。");
+    expect(target?.metadata.parentFullContext).toContain("写一句核心价值主张。");
+    expect(target?.metadata.parentFullContext).toContain("范围文档。");
+  });
+
   it("为子块保留父路径与父上下文", () => {
     const text = [
       "# 总览",

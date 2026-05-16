@@ -215,12 +215,37 @@ describe("RAG UI", () => {
           parentKind: "section",
           parentTitle: "步骤 1：定义 MVP 边界",
           parentContext: "步骤说明。",
+          parentFullContext: "步骤说明。\n\n写一句核心价值主张。\n\n范围文档。",
         },
       },
     });
     expect(document.getElementById("ragChunkOpenSource")).not.toBeNull();
     expect(document.getElementById("ragChunkMeta")?.innerHTML).toContain("章节路径");
     expect(document.getElementById("ragChunkMeta")?.innerHTML).toContain("手册 &gt; 步骤 1：定义 MVP 边界");
+    expect(document.getElementById("ragChunkParentContext")?.textContent).toContain("写一句核心价值主张。");
+    expect(document.getElementById("ragChunkParentContext")?.textContent).toContain("范围文档。");
+  });
+
+  it("运行时把父级上下文和子块内容拆成上下分栏独立区域", async () => {
+    const { window, document } = await loadRagRuntime();
+    window.__RAG_TEST__.openChunkPreview({
+      score: 0.86,
+      chunk: {
+        content: "子模块内容",
+        metadata: {
+          docFileName: "guide.md",
+          chunkIndex: 1,
+          lineRange: [3, 8],
+          path: ["手册", "步骤 1：定义 MVP 边界"],
+          parentKind: "section",
+          parentTitle: "步骤 1：定义 MVP 边界",
+          parentFullContext: "父模块完整内容",
+        },
+      },
+    });
+    expect(document.getElementById("ragChunkParentPanel")).not.toBeNull();
+    expect(document.getElementById("ragChunkParentContext")?.textContent).toBe("父模块完整内容");
+    expect(document.getElementById("ragChunkContent")?.textContent).toBe("子模块内容");
   });
 
   it("运行时对缺失 parentKind 安全降级为未知", async () => {

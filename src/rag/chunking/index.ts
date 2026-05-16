@@ -35,6 +35,7 @@ type ParentChunk = {
   sectionTitle?: string;
   parentPath: string[];
   parentContext: string;
+  parentFullContext: string;
   parentKind: ParentChunkKind;
   parentTitle: string;
   startLine: number;
@@ -47,6 +48,7 @@ type ParentChunk = {
 type FinalChunkBlock = ParsedBlock & {
   parentPath: string[];
   parentContext: string;
+  parentFullContext: string;
   parentKind: ParentChunkKind;
   parentTitle: string;
   childIndexInParent: number;
@@ -297,14 +299,15 @@ function buildSectionParentChunks(blocks: ParsedBlock[], parentContextChars: num
     const contextBlocks = subtreeBlocks.length > 0 ? subtreeBlocks : group;
     const first = contextBlocks[0]!;
     const last = contextBlocks[contextBlocks.length - 1]!;
-    const parentContext = contextBlocks
+    const parentFullContext = contextBlocks
       .map((item) => item.content)
-      .join("\n\n")
-      .slice(0, parentContextChars);
+      .join("\n\n");
+    const parentContext = parentFullContext.slice(0, parentContextChars);
 
     return {
       parentPath,
       parentContext,
+      parentFullContext,
       parentKind: "section",
       parentTitle: buildSectionTitle(parentPath.length > 0 ? parentPath : first.path),
       startLine: first.startLine,
@@ -328,12 +331,13 @@ function buildClusterParentChunks(blocks: ParsedBlock[], parentContextChars: num
     }
     const first = bucket[0]!;
     const last = bucket[bucket.length - 1]!;
+    const parentFullContext = bucket
+      .map((item) => item.content)
+      .join("\n\n");
     parents.push({
       parentPath: first.path.length > 0 ? [first.path[0]!] : [],
-      parentContext: bucket
-        .map((item) => item.content)
-        .join("\n\n")
-        .slice(0, parentContextChars),
+      parentContext: parentFullContext.slice(0, parentContextChars),
+      parentFullContext,
       parentKind: "cluster",
       parentTitle: `未命名片段 ${parents.length + 1}`,
       startLine: first.startLine,
@@ -457,6 +461,7 @@ function buildChildChunks(
       ...block,
       parentPath: [...parent.parentPath],
       parentContext: parent.parentContext,
+      parentFullContext: parent.parentFullContext,
       parentKind: parent.parentKind,
       parentTitle: parent.parentTitle,
       childIndexInParent,
@@ -507,6 +512,7 @@ export function chunkText(
       ...(block.path.length > 0 ? { path: block.path } : {}),
       ...(block.parentPath.length > 0 ? { parentPath: block.parentPath } : {}),
       ...(block.parentContext ? { parentContext: block.parentContext } : {}),
+      ...(block.parentFullContext ? { parentFullContext: block.parentFullContext } : {}),
       parentKind: block.parentKind,
       parentTitle: block.parentTitle,
       childIndexInParent: block.childIndexInParent,
