@@ -191,6 +191,10 @@ async function loadRagRuntime(fetchImpl?: FetchMock): Promise<{
     '  window.RAG_MODAL = {\n    open,\n    close,\n  };\n  window.__RAG_TEST__ = { openChunkPreview, selectKb, toggleBindingKb, bindCurrentRun, getState: () => state };\n})();',
   );
   const window = {} as Record<string, any>;
+  const appState = { runtime: { currentRunState: null as Record<string, unknown> | null } };
+  window.JapAppState = {
+    getState: () => appState,
+  };
   const document = new FakeDocument();
   const run = new Function("window", "document", "fetch", "btoa", "requestAnimationFrame", "setTimeout", script);
   run(
@@ -207,6 +211,9 @@ async function loadRagRuntime(fetchImpl?: FetchMock): Promise<{
       return 0;
     },
   );
+  window.__RAG_TEST__.setCurrentRunState = (value: Record<string, unknown> | null) => {
+    appState.runtime.currentRunState = value;
+  };
   return { window, document };
 }
 
@@ -327,10 +334,10 @@ describe("RAG UI", () => {
     workspacePath.id = "workspacePath";
     workspacePath.value = "D:/demo";
     document.body.appendChild(workspacePath);
+    window.__RAG_TEST__.setCurrentRunState({ runId: "run-1", ragKbIds: ["kb-a"] });
 
     await window.RAG_MODAL.open();
     await window.__RAG_TEST__.selectKb("kb-a");
-    window.__RAG_TEST__.toggleBindingKb("kb-a");
     window.__RAG_TEST__.toggleBindingKb("kb-b");
 
     expect(window.__RAG_TEST__.getState().selectedKb?.id).toBe("kb-a");
@@ -378,13 +385,14 @@ describe("RAG UI", () => {
     currentTaskId.id = "currentTaskId";
     currentTaskId.textContent = "run-1";
     document.body.appendChild(currentTaskId);
+    window.__RAG_TEST__.setCurrentRunState({ runId: "run-1", ragKbIds: ["kb-a"] });
 
     await window.RAG_MODAL.open();
-    window.__RAG_TEST__.toggleBindingKb("kb-a");
     expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual(["kb-a"]);
 
     window.RAG_MODAL.close();
     currentTaskId.textContent = "run-2";
+    window.__RAG_TEST__.setCurrentRunState({ runId: "run-2", ragKbIds: [] });
     await window.RAG_MODAL.open();
 
     expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual([]);
@@ -416,12 +424,13 @@ describe("RAG UI", () => {
     workspacePath.id = "workspacePath";
     workspacePath.value = "D:/demo";
     document.body.appendChild(workspacePath);
+    window.__RAG_TEST__.setCurrentRunState({ runId: "run-1", ragKbIds: ["kb-a"] });
 
     await window.RAG_MODAL.open();
-    window.__RAG_TEST__.toggleBindingKb("kb-a");
     expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual(["kb-a"]);
 
     currentTaskId.textContent = "run-2";
+    window.__RAG_TEST__.setCurrentRunState({ runId: "run-2", ragKbIds: [] });
     window.__RAG_TEST__.toggleBindingKb("kb-b");
     expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual(["kb-b"]);
 
@@ -437,6 +446,52 @@ describe("RAG UI", () => {
     expect(patchCall).toBeTruthy();
     expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
       ragKbIds: ["kb-b"],
+      workspace: { path: "D:/demo" },
+    });
+  });
+
+  it("没有选中知识库时允许提交空数组以解绑全部", async () => {
+    const fetchMock = vi.fn<FetchMock>(async (url, options) => {
+      if (url === "/api/v1/rag/knowledge-bases") {
+        return createJsonResponse([
+          { id: "kb-a", name: "知识库 A", documentCount: 1, chunkCount: 2 },
+        ]);
+      }
+      if (url === "/api/v1/tasks/filewise/run-1/rag" && options?.method === "PATCH") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true }),
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const { window, document } = await loadRagRuntime(fetchMock);
+    const currentTaskId = document.createElement();
+    currentTaskId.id = "currentTaskId";
+    currentTaskId.textContent = "run-1";
+    document.body.appendChild(currentTaskId);
+    const workspacePath = document.createElement();
+    workspacePath.id = "workspacePath";
+    workspacePath.value = "D:/demo";
+    document.body.appendChild(workspacePath);
+    window.__RAG_TEST__.setCurrentRunState({ runId: "run-1", ragKbIds: ["kb-a"] });
+
+    await window.RAG_MODAL.open();
+    window.__RAG_TEST__.toggleBindingKb("kb-a");
+    expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual([]);
+
+    const bindPromise = window.__RAG_TEST__.bindCurrentRun();
+    await Promise.resolve();
+    await Promise.resolve();
+    document.getElementById("ragFeedbackOk")?.dispatchEvent({ type: "click" });
+    await bindPromise;
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, options]) => url === "/api/v1/tasks/filewise/run-1/rag" && options?.method === "PATCH",
+    );
+    expect(patchCall).toBeTruthy();
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      ragKbIds: [],
       workspace: { path: "D:/demo" },
     });
   });

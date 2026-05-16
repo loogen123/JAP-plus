@@ -289,13 +289,21 @@
     return runId && runId !== "--" ? runId : "";
   }
 
+  function getCurrentRunState() {
+    return window.JapAppState?.getState?.()?.runtime?.currentRunState || null;
+  }
+
   function syncBindingRunContext() {
     const runId = getCurrentRunId();
     if (state.bindingRunId === runId) {
       return;
     }
     state.bindingRunId = runId;
-    state.bindingKbIds = [];
+    const currentRunState = getCurrentRunState();
+    const boundKbIds = currentRunState && currentRunState.runId === runId && Array.isArray(currentRunState.ragKbIds)
+      ? currentRunState.ragKbIds
+      : [];
+    state.bindingKbIds = [...boundKbIds];
   }
 
   function closeCreateKbModal() {
@@ -513,7 +521,7 @@
   function updateBindingSummary() {
     const count = Array.isArray(state.bindingKbIds) ? state.bindingKbIds.length : 0;
     setText("ragBindMetaLine", `绑定已选择 ${count} 个知识库`);
-    setDisabled("ragBtnBindRun", count === 0);
+    setDisabled("ragBtnBindRun", false);
   }
 
   async function loadKbList() {
@@ -828,10 +836,6 @@
     syncBindingRunContext();
     updateBindingSummary();
     const ragKbIds = (state.bindingKbIds || []).filter((kbId) => typeof kbId === "string" && kbId.trim());
-    if (ragKbIds.length === 0) {
-      await showNotice("无法绑定", "请先选择要绑定的知识库。");
-      return;
-    }
     const runId = document.getElementById("currentTaskId")?.textContent?.trim();
     if (!runId || runId === "--") {
       await showNotice("无法绑定", "当前没有运行中的任务。");
@@ -847,7 +851,7 @@
       await showNotice("绑定失败", "请确认当前任务存在且工作目录配置正确。");
       return;
     }
-    await showNotice("绑定成功", "知识库已绑定到当前任务。");
+    await showNotice("绑定成功", ragKbIds.length > 0 ? `已绑定 ${ragKbIds.length} 个知识库。` : "已解绑全部知识库。");
   }
 
   async function refreshAll() {
