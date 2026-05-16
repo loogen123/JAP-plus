@@ -51,7 +51,7 @@ export class TaskController {
     }
     const ragKbIds = [...new Set(
       input
-        .filter((item: unknown): item is string => typeof item === "string" && item.trim())
+        .filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
         .map((item) => item.trim()),
     )];
     return { ragKbIds };
@@ -373,8 +373,8 @@ export class TaskController {
         workspace,
         questionnaire,
         userAnswers,
-        selectedModules,
-        ragKbIds,
+        ...(selectedModules ? { selectedModules } : {}),
+        ...(ragKbIds ? { ragKbIds } : {}),
       });
       res.json({
         runId: meta.runId,
@@ -413,7 +413,11 @@ export class TaskController {
       const nextRagKbIds = ragKbIds && ragKbIds.length > 0 ? ragKbIds : undefined;
       await withRunLock(runId, async () => {
         const meta = await readMeta(workspacePath, runId);
-        meta.ragKbIds = nextRagKbIds;
+        if (nextRagKbIds) {
+          meta.ragKbIds = nextRagKbIds;
+        } else {
+          delete meta.ragKbIds;
+        }
         await saveMeta(meta);
       });
       const refreshed = await readMeta(workspacePath, runId);
