@@ -57,7 +57,7 @@ export type FileRunMeta = {
     apiKey: string;
     modelName: string;
   };
-  ragKbId?: string;
+  ragKbIds?: string[];
   workspacePath: string;
   selectedModules?: string[];
   status: "RUNNING" | "DONE" | "FAILED";
@@ -155,6 +155,7 @@ export function toFileStatusResponse(meta: FileRunMeta, workspacePath: string): 
     workspacePath,
     files: meta.files,
     actions: getFileRuntimeRecord(meta).actions,
+    ragKbIds: meta.ragKbIds,
     selectedModules: meta.selectedModules,
   };
 }

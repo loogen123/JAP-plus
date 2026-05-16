@@ -42,6 +42,31 @@ import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
 
 export class TaskController {
+  private parseRagKbIds(input: unknown): { ragKbIds?: string[]; error?: string } {
+    if (input === undefined) {
+      return {};
+    }
+    if (!Array.isArray(input)) {
+      return { error: "ragKbIds must be an array" };
+    }
+    const ragKbIds = [...new Set(
+      input
+        .filter((item: unknown): item is string => typeof item === "string" && item.trim())
+        .map((item) => item.trim()),
+    )];
+    return { ragKbIds };
+  }
+
+  private async validateRagKbIds(ragKbIds?: string[]): Promise<string | null> {
+    for (const kbId of ragKbIds ?? []) {
+      const kb = await getKnowledgeBase(kbId);
+      if (!kb) {
+        return `invalid ragKbId: ${kbId}`;
+      }
+    }
+    return null;
+  }
+
   private isBaseFilesApproved(meta: Awaited<ReturnType<typeof readMeta>>): boolean {
     return meta.files.filter((f) => f.fileId !== "07").every((f) => f.status === "APPROVED");
   }
@@ -322,20 +347,24 @@ export class TaskController {
     const selectedModules = Array.isArray(req.body?.selectedModules)
       ? req.body.selectedModules.filter((item: unknown): item is string => typeof item === "string")
       : undefined;
-    const ragKbId = typeof req.body?.ragKbId === "string" && req.body.ragKbId.trim()
-      ? req.body.ragKbId.trim()
-      : undefined;
+    if (req.body?.ragKbId !== undefined) {
+      res.status(400).json({ message: "ragKbIds must be an array" });
+      return;
+    }
+    const { ragKbIds, error: ragKbIdsError } = this.parseRagKbIds(req.body?.ragKbIds);
     if (!requirement) {
       res.status(400).json({ message: "requirement is required" });
       return;
     }
+    if (ragKbIdsError) {
+      res.status(400).json({ message: ragKbIdsError });
+      return;
+    }
     try {
-      if (ragKbId) {
-        const kb = await getKnowledgeBase(ragKbId);
-        if (!kb) {
-          res.status(400).json({ message: "invalid ragKbId" });
-          return;
-        }
+      const ragValidationError = await this.validateRagKbIds(ragKbIds);
+      if (ragValidationError) {
+        res.status(400).json({ message: ragValidationError });
+        return;
       }
       const { meta, resumed } = await createOrResumeFilewiseRun({
         runId,
@@ -345,7 +374,7 @@ export class TaskController {
         questionnaire,
         userAnswers,
         selectedModules,
-        ragKbId,
+        ragKbIds,
       });
       res.json({
         runId: meta.runId,
@@ -362,24 +391,29 @@ export class TaskController {
   async bindRagKnowledgeBase(req: Request, res: Response) {
     const runId = String(req.params.runId ?? "").trim();
     const workspacePath = resolveWorkspacePath(req.body?.workspace ?? req.query.workspace ?? req.query.workspacePath);
-    const ragKbId = typeof req.body?.ragKbId === "string" && req.body.ragKbId.trim()
-      ? req.body.ragKbId.trim()
-      : undefined;
+    if (req.body?.ragKbId !== undefined) {
+      res.status(400).json({ message: "ragKbIds must be an array" });
+      return;
+    }
+    const { ragKbIds, error: ragKbIdsError } = this.parseRagKbIds(req.body?.ragKbIds);
     if (!runId) {
       res.status(400).json({ message: "runId is required" });
       return;
     }
+    if (ragKbIdsError) {
+      res.status(400).json({ message: ragKbIdsError });
+      return;
+    }
     try {
-      if (ragKbId) {
-        const kb = await getKnowledgeBase(ragKbId);
-        if (!kb) {
-          res.status(400).json({ message: "invalid ragKbId" });
-          return;
-        }
+      const ragValidationError = await this.validateRagKbIds(ragKbIds);
+      if (ragValidationError) {
+        res.status(400).json({ message: ragValidationError });
+        return;
       }
+      const nextRagKbIds = ragKbIds && ragKbIds.length > 0 ? ragKbIds : undefined;
       await withRunLock(runId, async () => {
         const meta = await readMeta(workspacePath, runId);
-        meta.ragKbId = ragKbId;
+        meta.ragKbIds = nextRagKbIds;
         await saveMeta(meta);
       });
       const refreshed = await readMeta(workspacePath, runId);

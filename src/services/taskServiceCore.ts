@@ -690,7 +690,7 @@ export async function tryGenerateWithMcp(
 }
 
 async function withRagRequirement(meta: FileRunMeta): Promise<FileRunMeta> {
-  const kbId = meta.ragKbId;
+  const kbId = meta.ragKbIds?.[0];
   if (!kbId) {
     return meta;
   }
@@ -1109,7 +1109,7 @@ export async function createFilewiseRun(params: {
   questionnaire: JapState["questionnaire"];
   userAnswers: Record<string, string | string[]>;
   selectedModules?: string[];
-  ragKbId?: string;
+  ragKbIds?: string[];
 }): Promise<FileRunMeta> {
   const workspacePath = resolveWorkspacePath(params.workspace);
   const taskRoot = ensureInsideWorkspace(workspacePath, path.join(workspacePath, "tasks"));
@@ -1133,7 +1133,7 @@ export async function createFilewiseRun(params: {
     questionnaire: params.questionnaire,
     userAnswers: params.userAnswers,
     llm,
-    ...(params.ragKbId ? { ragKbId: params.ragKbId } : {}),
+    ...(params.ragKbIds && params.ragKbIds.length > 0 ? { ragKbIds: params.ragKbIds } : {}),
     workspacePath,
     status: "RUNNING",
     files: createInitialFileStates(params.selectedModules),
@@ -1164,7 +1164,7 @@ export async function createOrResumeFilewiseRun(params: {
   questionnaire: JapState["questionnaire"];
   userAnswers: Record<string, string | string[]>;
   selectedModules?: string[];
-  ragKbId?: string;
+  ragKbIds?: string[];
 }): Promise<{ meta: FileRunMeta; resumed: boolean }> {
   const workspacePath = resolveWorkspacePath(params.workspace);
   if (params.runId && params.runId.trim()) {
@@ -1182,7 +1182,7 @@ export async function createOrResumeFilewiseRun(params: {
     questionnaire: params.questionnaire,
     userAnswers: params.userAnswers,
     ...(params.selectedModules ? { selectedModules: params.selectedModules } : {}),
-    ...(params.ragKbId ? { ragKbId: params.ragKbId } : {}),
+    ...(params.ragKbIds && params.ragKbIds.length > 0 ? { ragKbIds: params.ragKbIds } : {}),
   });
   return { meta, resumed: false };
 }
