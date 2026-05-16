@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 async function readProjectFile(relativePath: string): Promise<string> {
   return fs.readFile(path.resolve(process.cwd(), relativePath), "utf-8");
@@ -166,14 +166,29 @@ class FakeDocument {
   }
 }
 
-async function loadRagRuntime(): Promise<{
+type FetchMock = (url: string, options?: Record<string, unknown>) => Promise<{
+  ok: boolean;
+  json: () => Promise<Record<string, unknown>>;
+}>;
+
+function createJsonResponse(data: unknown, ok = true): {
+  ok: boolean;
+  json: () => Promise<Record<string, unknown>>;
+} {
+  return {
+    ok,
+    json: async () => (ok ? { code: 0, data } : { code: 1, message: "request failed" }),
+  };
+}
+
+async function loadRagRuntime(fetchImpl?: FetchMock): Promise<{
   window: Record<string, any>;
   document: FakeDocument;
 }> {
   const raw = await readProjectFile("public/js/ragModal.js");
   const script = raw.replace(
     '  window.RAG_MODAL = {\n    open,\n    close,\n  };\n})();',
-    '  window.RAG_MODAL = {\n    open,\n    close,\n  };\n  window.__RAG_TEST__ = { openChunkPreview };\n})();',
+    '  window.RAG_MODAL = {\n    open,\n    close,\n  };\n  window.__RAG_TEST__ = { openChunkPreview, selectKb, toggleBindingKb, bindCurrentRun, getState: () => state };\n})();',
   );
   const window = {} as Record<string, any>;
   const document = new FakeDocument();
@@ -181,7 +196,7 @@ async function loadRagRuntime(): Promise<{
   run(
     window,
     document,
-    async () => ({ ok: true, json: async () => ({ code: 0, data: [] }) }),
+    fetchImpl ?? (async () => createJsonResponse([])),
     (input: string) => Buffer.from(input, "binary").toString("base64"),
     (callback: FrameRequestCallback) => {
       callback(0);
@@ -267,5 +282,162 @@ describe("RAG UI", () => {
     expect(document.getElementById("ragChunkMeta")?.innerHTML).toContain("父块类型");
     expect(document.getElementById("ragChunkMeta")?.innerHTML).toContain("未知");
     expect(document.getElementById("ragChunkMeta")?.innerHTML).not.toContain("章节父块");
+  });
+
+  it("绑定当前任务时支持多选且保留当前查看知识库", async () => {
+    const fetchMock = vi.fn<FetchMock>(async (url, options) => {
+      if (url === "/api/v1/rag/knowledge-bases") {
+        return createJsonResponse([
+          { id: "kb-a", name: "知识库 A", documentCount: 1, chunkCount: 2 },
+          { id: "kb-b", name: "知识库 B", documentCount: 3, chunkCount: 5 },
+        ]);
+      }
+      if (url === "/api/v1/rag/knowledge-bases/kb-a") {
+        return createJsonResponse({
+          id: "kb-a",
+          name: "知识库 A",
+          documentCount: 1,
+          chunkCount: 2,
+          documents: [{ id: "doc-a", fileName: "a.md", fileType: "md" }],
+        });
+      }
+      if (url === "/api/v1/rag/knowledge-bases/kb-b") {
+        return createJsonResponse({
+          id: "kb-b",
+          name: "知识库 B",
+          documentCount: 3,
+          chunkCount: 5,
+          documents: [{ id: "doc-b", fileName: "b.md", fileType: "md" }],
+        });
+      }
+      if (url === "/api/v1/tasks/filewise/run-1/rag" && options?.method === "PATCH") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true }),
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const { window, document } = await loadRagRuntime(fetchMock);
+    const currentTaskId = document.createElement();
+    currentTaskId.id = "currentTaskId";
+    currentTaskId.textContent = "run-1";
+    document.body.appendChild(currentTaskId);
+    const workspacePath = document.createElement();
+    workspacePath.id = "workspacePath";
+    workspacePath.value = "D:/demo";
+    document.body.appendChild(workspacePath);
+
+    await window.RAG_MODAL.open();
+    await window.__RAG_TEST__.selectKb("kb-a");
+    window.__RAG_TEST__.toggleBindingKb("kb-a");
+    window.__RAG_TEST__.toggleBindingKb("kb-b");
+
+    expect(window.__RAG_TEST__.getState().selectedKb?.id).toBe("kb-a");
+    expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual(["kb-a", "kb-b"]);
+    expect(document.getElementById("ragKbMetaLine")?.textContent).toContain("知识库 A");
+    expect(document.getElementById("ragBindMetaLine")?.textContent).toContain("2");
+
+    const bindPromise = window.__RAG_TEST__.bindCurrentRun();
+    await Promise.resolve();
+    await Promise.resolve();
+    document.getElementById("ragFeedbackOk")?.dispatchEvent({ type: "click" });
+    await bindPromise;
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, options]) => url === "/api/v1/tasks/filewise/run-1/rag" && options?.method === "PATCH",
+    );
+    expect(patchCall).toBeTruthy();
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      ragKbIds: ["kb-a", "kb-b"],
+      workspace: { path: "D:/demo" },
+    });
+  });
+
+  it("切换任务后重新打开弹窗不会沿用上一个任务的绑定选择", async () => {
+    const fetchMock = vi.fn<FetchMock>(async (url) => {
+      if (url === "/api/v1/rag/knowledge-bases") {
+        return createJsonResponse([
+          { id: "kb-a", name: "知识库 A", documentCount: 1, chunkCount: 2 },
+          { id: "kb-b", name: "知识库 B", documentCount: 3, chunkCount: 5 },
+        ]);
+      }
+      if (url === "/api/v1/rag/knowledge-bases/kb-a") {
+        return createJsonResponse({
+          id: "kb-a",
+          name: "知识库 A",
+          documentCount: 1,
+          chunkCount: 2,
+          documents: [{ id: "doc-a", fileName: "a.md", fileType: "md" }],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const { window, document } = await loadRagRuntime(fetchMock);
+    const currentTaskId = document.createElement();
+    currentTaskId.id = "currentTaskId";
+    currentTaskId.textContent = "run-1";
+    document.body.appendChild(currentTaskId);
+
+    await window.RAG_MODAL.open();
+    window.__RAG_TEST__.toggleBindingKb("kb-a");
+    expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual(["kb-a"]);
+
+    window.RAG_MODAL.close();
+    currentTaskId.textContent = "run-2";
+    await window.RAG_MODAL.open();
+
+    expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual([]);
+    expect(document.getElementById("ragBindMetaLine")?.textContent).toContain("0");
+  });
+
+  it("弹窗保持打开时切换任务不会复用旧绑定选择", async () => {
+    const fetchMock = vi.fn<FetchMock>(async (url, options) => {
+      if (url === "/api/v1/rag/knowledge-bases") {
+        return createJsonResponse([
+          { id: "kb-a", name: "知识库 A", documentCount: 1, chunkCount: 2 },
+          { id: "kb-b", name: "知识库 B", documentCount: 3, chunkCount: 5 },
+        ]);
+      }
+      if (url === "/api/v1/tasks/filewise/run-2/rag" && options?.method === "PATCH") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true }),
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const { window, document } = await loadRagRuntime(fetchMock);
+    const currentTaskId = document.createElement();
+    currentTaskId.id = "currentTaskId";
+    currentTaskId.textContent = "run-1";
+    document.body.appendChild(currentTaskId);
+    const workspacePath = document.createElement();
+    workspacePath.id = "workspacePath";
+    workspacePath.value = "D:/demo";
+    document.body.appendChild(workspacePath);
+
+    await window.RAG_MODAL.open();
+    window.__RAG_TEST__.toggleBindingKb("kb-a");
+    expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual(["kb-a"]);
+
+    currentTaskId.textContent = "run-2";
+    window.__RAG_TEST__.toggleBindingKb("kb-b");
+    expect(window.__RAG_TEST__.getState().bindingKbIds).toEqual(["kb-b"]);
+
+    const bindPromise = window.__RAG_TEST__.bindCurrentRun();
+    await Promise.resolve();
+    await Promise.resolve();
+    document.getElementById("ragFeedbackOk")?.dispatchEvent({ type: "click" });
+    await bindPromise;
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, requestOptions]) => url === "/api/v1/tasks/filewise/run-2/rag" && requestOptions?.method === "PATCH",
+    );
+    expect(patchCall).toBeTruthy();
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      ragKbIds: ["kb-b"],
+      workspace: { path: "D:/demo" },
+    });
   });
 });

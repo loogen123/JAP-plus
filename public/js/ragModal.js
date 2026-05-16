@@ -2,6 +2,8 @@
   const state = {
     kbs: [],
     selectedKb: null,
+    bindingRunId: "",
+    bindingKbIds: [],
     selectedDocId: null,
     selectedDocContent: "",
     lastQueryResults: [],
@@ -48,6 +50,7 @@
           <div style="display:flex;flex-direction:column;">
             <span style="font-size:18px;">知识库</span>
             <span id="ragKbMetaLine" style="font-size:12px;color:var(--muted);font-weight:500;">未选择知识库</span>
+            <span id="ragBindMetaLine" style="font-size:12px;color:var(--muted);font-weight:500;">绑定已选择 0 个知识库</span>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
             <button id="ragBtnCreateKb" class="btn btn-light" style="padding:6px 10px;font-size:12px;">新建</button>
@@ -281,6 +284,20 @@
     }, 0);
   }
 
+  function getCurrentRunId() {
+    const runId = document.getElementById("currentTaskId")?.textContent?.trim();
+    return runId && runId !== "--" ? runId : "";
+  }
+
+  function syncBindingRunContext() {
+    const runId = getCurrentRunId();
+    if (state.bindingRunId === runId) {
+      return;
+    }
+    state.bindingRunId = runId;
+    state.bindingKbIds = [];
+  }
+
   function closeCreateKbModal() {
     const modal = document.getElementById("ragCreateKbModal");
     if (modal) {
@@ -331,6 +348,7 @@
 
   function open() {
     const modal = ensureModal();
+    syncBindingRunContext();
     modal.classList.add("show");
     return refreshAll();
   }
@@ -487,8 +505,20 @@
     return (state.selectedKb && Array.isArray(state.selectedKb.documents)) ? state.selectedKb.documents : [];
   }
 
+  function syncBindingKbIds() {
+    const availableIds = new Set((state.kbs || []).map((kb) => kb.id));
+    state.bindingKbIds = (state.bindingKbIds || []).filter((kbId) => availableIds.has(kbId));
+  }
+
+  function updateBindingSummary() {
+    const count = Array.isArray(state.bindingKbIds) ? state.bindingKbIds.length : 0;
+    setText("ragBindMetaLine", `绑定已选择 ${count} 个知识库`);
+    setDisabled("ragBtnBindRun", count === 0);
+  }
+
   async function loadKbList() {
     state.kbs = await request("/api/v1/rag/knowledge-bases");
+    syncBindingKbIds();
   }
 
   function renderKbList() {
@@ -496,6 +526,7 @@
     const list = (state.kbs || []).filter((kb) => !keyword || String(kb.name || "").toLowerCase().includes(keyword));
     if (list.length === 0) {
       setHtml("ragKbList", '<div class="history-empty">暂无知识库</div>');
+      updateBindingSummary();
       return;
     }
     setHtml(
@@ -503,15 +534,28 @@
       list
         .map((kb) => {
           const active = state.selectedKb && state.selectedKb.id === kb.id;
+          const selectedForBinding = (state.bindingKbIds || []).includes(kb.id);
           return `
-            <div class="history-item ${active ? "active" : ""}" style="border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer;" data-action="select-kb" data-kb-id="${kb.id}">
-              <div style="font-weight:700;color:var(--text);font-size:14px;line-height:1.2;">${escapeHtml(kb.name)}</div>
-              <div class="history-meta" style="margin-top:6px;">${kb.documentCount} 文档 · ${kb.chunkCount} 分块</div>
+            <div class="history-item ${active ? "active" : ""}" style="border-radius:10px;border:1px solid var(--line);background:#fff;">
+              <div style="display:flex;align-items:flex-start;gap:8px;">
+                <div style="flex:1;min-width:0;cursor:pointer;" data-action="select-kb" data-kb-id="${kb.id}">
+                  <div style="font-weight:700;color:var(--text);font-size:14px;line-height:1.2;">${escapeHtml(kb.name)}</div>
+                  <div class="history-meta" style="margin-top:6px;">${kb.documentCount} 文档 · ${kb.chunkCount} 分块</div>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-light"
+                  style="padding:4px 8px;font-size:12px;white-space:nowrap;${selectedForBinding ? "color:#2f5d9e;border-color:#bcd0f5;background:#eef4ff;" : ""}"
+                  data-action="toggle-bind-kb"
+                  data-kb-id="${kb.id}"
+                >${selectedForBinding ? "已选" : "选择"}</button>
+              </div>
             </div>
           `;
         })
         .join(""),
     );
+    updateBindingSummary();
   }
 
   function renderDocList() {
@@ -553,10 +597,24 @@
     setText("ragKbMetaLine", `${kb.name || "知识库"} · ${kb.documentCount ?? 0} 文档 · ${kb.chunkCount ?? 0} 分块`);
     setDisabled("ragBtnUpload", false);
     setDisabled("ragBtnDeleteKb", false);
-    setDisabled("ragBtnBindRun", false);
     setDisabled("ragBtnQuery", false);
     renderKbList();
     renderDocList();
+  }
+
+  function toggleBindingKb(kbId) {
+    syncBindingRunContext();
+    if (!kbId) {
+      return;
+    }
+    const next = new Set(state.bindingKbIds || []);
+    if (next.has(kbId)) {
+      next.delete(kbId);
+    } else {
+      next.add(kbId);
+    }
+    state.bindingKbIds = Array.from(next);
+    renderKbList();
   }
 
   function selectDoc(docId) {
@@ -618,6 +676,7 @@
     );
     if (!confirmed) return;
     await request(`/api/v1/rag/knowledge-bases/${state.selectedKb.id}`, { method: "DELETE" });
+    state.bindingKbIds = (state.bindingKbIds || []).filter((kbId) => kbId !== state.selectedKb.id);
     state.selectedKb = null;
     state.selectedDocId = null;
     state.selectedDocContent = "";
@@ -766,7 +825,13 @@
   }
 
   async function bindCurrentRun() {
-    if (!state.selectedKb) return;
+    syncBindingRunContext();
+    updateBindingSummary();
+    const ragKbIds = (state.bindingKbIds || []).filter((kbId) => typeof kbId === "string" && kbId.trim());
+    if (ragKbIds.length === 0) {
+      await showNotice("无法绑定", "请先选择要绑定的知识库。");
+      return;
+    }
     const runId = document.getElementById("currentTaskId")?.textContent?.trim();
     if (!runId || runId === "--") {
       await showNotice("无法绑定", "当前没有运行中的任务。");
@@ -776,7 +841,7 @@
     const resp = await fetch(`/api/v1/tasks/filewise/${runId}/rag`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ragKbId: state.selectedKb.id, workspace: { path: workspacePath } }),
+      body: JSON.stringify({ ragKbIds, workspace: { path: workspacePath } }),
     });
     if (!resp.ok) {
       await showNotice("绑定失败", "请确认当前任务存在且工作目录配置正确。");
@@ -796,8 +861,15 @@
       }
       state.selectedKb = null;
       state.selectedDocId = null;
+      setText("ragKbMetaLine", "未选择知识库");
+      setDisabled("ragBtnUpload", true);
+      setDisabled("ragBtnDeleteKb", true);
+      setDisabled("ragBtnQuery", true);
+      setDisabled("ragBtnOpenDoc", true);
+      setDisabled("ragBtnDeleteDoc", true);
     }
     renderDocList();
+    updateBindingSummary();
     return;
   }
 
@@ -810,6 +882,9 @@
     if (action === "select-kb") {
       const kbId = target.getAttribute("data-kb-id");
       if (kbId) void selectKb(kbId);
+    } else if (action === "toggle-bind-kb") {
+      const kbId = target.getAttribute("data-kb-id");
+      if (kbId) toggleBindingKb(kbId);
     } else if (action === "select-doc") {
       const docId = target.getAttribute("data-doc-id");
       if (docId) selectDoc(docId);
