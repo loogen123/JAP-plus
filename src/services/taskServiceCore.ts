@@ -69,6 +69,7 @@ import {
   readFileBody as readArtifactFileBody,
   writeFileBody as writeArtifactFileBody,
 } from "../persistence/artifactStore.js";
+import { buildRagQuery } from "../rag/queryBuilder.js";
 
 export {
   FILEWISE_STATUS_ORDER,
@@ -689,7 +690,11 @@ export async function tryGenerateWithMcp(
   }
 }
 
-async function withRagRequirement(meta: FileRunMeta): Promise<FileRunMeta> {
+async function withRagRequirement(
+  meta: FileRunMeta,
+  fileId: FileId,
+  approvedSummary: string,
+): Promise<FileRunMeta> {
   const kbId = meta.ragKbIds?.[0];
   if (!kbId) {
     return meta;
@@ -701,8 +706,14 @@ async function withRagRequirement(meta: FileRunMeta): Promise<FileRunMeta> {
       return meta;
     }
     const service = new RAGService();
+    const builtQuery = buildRagQuery({
+      fileId,
+      stage: meta.stage,
+      requirement: meta.requirement,
+      approvedSummary,
+    });
     const ctx = await service.retrieveAndBuild(
-      meta.requirement,
+      builtQuery.query,
       kbId,
       {
         baseURL: meta.llm.baseUrl,
@@ -729,8 +740,8 @@ export async function runSingleFileGeneration(meta: FileRunMeta, fileId: FileId,
   toolName: string | null;
   fallbackReason: string | null;
 }> {
-  const generationMeta = await withRagRequirement(meta);
-  const approvedSummary = await loadApprovedArtifactSummary(generationMeta);
+  const approvedSummary = await loadApprovedArtifactSummary(meta);
+  const generationMeta = await withRagRequirement(meta, fileId, approvedSummary);
   const isFallback = attempt >= 2;
   const isMinimalist = attempt === 3;
 
